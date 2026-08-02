@@ -138,25 +138,33 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
 
   // Stripe: create a checkout for the amount. Without a key, mark as simulated.
   if (stripe) {
-    const checkout = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [{
-        price_data: {
-          currency: process.env.CURRENCY || "usd",
-          product_data: { name: "Driveway parking" },
-          unit_amount: amount,
-        },
-        quantity: 1,
-      }],
-      success_url: `${process.env.BASE_URL}/?paid=1`,
-      cancel_url: `${process.env.BASE_URL}/?paid=0`,
-    });
-    db.prepare("UPDATE sessions SET payment_status = 'checkout_created' WHERE id = ?").run(s.id);
-    return res.json({ amount_cents: amount, pay_url: checkout.url });
+    try {
+      const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
+      const checkout = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{
+          price_data: {
+            currency: process.env.CURRENCY || "usd",
+            product_data: { name: "Driveway parking" },
+            unit_amount: Math.max(amount, 50), // Stripe minimum charge is $0.50
+          },
+          quantity: 1,
+        }],
+        success_url: `${base}/?paid=1`,
+        cancel_url: `${base}/?paid=0`,
+      });
+      db.prepare("UPDATE sessions SET payment_status = 'checkout_created' WHERE id = ?").run(s.id);
+      return res.json({ amount_cents: amount, pay_url: checkout.url });
+    } catch (err) {
+      console.error("Stripe checkout failed:", err.message);
+      db.prepare("UPDATE sessions SET payment_status = 'stripe_error' WHERE id = ?").run(s.id);
+      return res.status(502).json({ error: "Payment setup failed: " + err.message });
+    }
   }
   db.prepare("UPDATE sessions SET payment_status = 'simulated' WHERE id = ?").run(s.id);
   res.json({ amount_cents: amount, pay_url: null });
 });
+
 
 app.get("/api/me/session", auth, (req, res) => {
   const s = db.prepare(`
@@ -169,3 +177,5 @@ app.get("/api/me/session", auth, (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`OpenSpot running on http://localhost:${port}`));
+
+process.on("unhandledRejection", (err) => console.error("Unhandled rejection:", err));
