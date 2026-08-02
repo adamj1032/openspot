@@ -168,7 +168,7 @@ async function checkSession(){
   const s = await api("/me/session");
   sess = s;
   const el = document.getElementById("session");
-  if(s){ el.style.display="block"; document.getElementById("sessHost").textContent=s.host; sessStart = new Date(s.started_at+"Z").getTime(); }
+  if(s){ el.style.display="block"; document.getElementById("sessHost").textContent=s.host; sessStart = new Date(s.started_at).getTime(); }
   else el.style.display="none";
 }
 async function endSession(){
