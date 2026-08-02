@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenSpot</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --green:#2FBF71; --red:#E85D5D; --ink:#14181F; --panel:#1B2028; --muted:#9AA1AC; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:system-ui,-apple-system,sans-serif; background:var(--ink); color:#fff; }
+  #app { max-width:480px; margin:0 auto; height:100dvh; display:flex; flex-direction:column; }
+  header { padding:14px 16px 10px; display:flex; justify-content:space-between; align-items:center; }
+  .logo { font-size:19px; font-weight:900; } .logo span { color:var(--green); }
+  .sub { font-size:11.5px; color:var(--muted); }
+  #map { flex:1; min-height:0; }
+  .bar { padding:10px 12px; display:flex; gap:8px; }
+  button { border:none; border-radius:12px; font-weight:800; color:#fff; cursor:pointer; }
+  .main { flex:1; padding:13px 0; font-size:14.5px; background:var(--green); }
+  .alt { background:var(--panel); color:var(--muted); }
+  .danger { background:var(--red); }
+  #authView { padding:32px 22px; }
+  #authView input { width:100%; margin:6px 0 14px; padding:12px; border-radius:10px; border:1px solid #333B47; background:var(--panel); color:#fff; font-size:15px; }
+  #authView label { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.5px; }
+  #session { display:none; padding:10px; background:var(--panel); text-align:center; }
+  #sheet { display:none; padding:14px 16px; background:var(--panel); }
+  #sheet input { width:100%; margin:6px 0 12px; padding:11px; border-radius:10px; border:1px solid #333B47; background:var(--ink); color:#fff; font-size:15px; }
+  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; color:var(--ink); padding:9px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; }
+  .pop b { font-size:15px; } .pop .m { color:#565D68; font-size:12.5px; margin:2px 0 8px; }
+  .pop button { width:100%; padding:10px 0; border-radius:9px; font-size:14px; margin-top:4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="authView">
+    <div class="logo" style="font-size:26px;margin-bottom:4px;">Open<span>Spot</span></div>
+    <div class="sub" style="margin-bottom:26px;">Live driveway parking near you</div>
+    <label>NAME (for sign up)</label><input id="aName" placeholder="Your name" />
+    <label>EMAIL</label><input id="aEmail" type="email" placeholder="you@example.com" />
+    <label>PASSWORD</label><input id="aPass" type="password" placeholder="••••••••" />
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button class="main alt" onclick="doAuth('login')">Sign in</button>
+      <button class="main" onclick="doAuth('signup')">Create account</button>
+    </div>
+  </div>
+
+  <div id="mainView" style="display:none;flex:1;min-height:0;flex-direction:column;">
+    <header>
+      <div><div class="logo">Open<span>Spot</span></div><div class="sub" id="hello"></div></div>
+      <div class="sub" id="count">…</div>
+    </header>
+    <div id="session">
+      <div style="font-size:11px;color:var(--green);font-weight:800;">PARKED — <span id="sessHost"></span></div>
+      <div style="font-size:22px;font-weight:800;" id="timer">00:00</div>
+      <button class="main danger" style="margin-top:6px;padding:10px 0;" onclick="endSession()">End & pay</button>
+    </div>
+    <div id="map"></div>
+    <div id="sheet">
+      <label>PRICE PER HOUR ($)</label><input id="sPrice" type="number" value="10" min="1" />
+      <label>NOTE FOR DRIVERS</label><input id="sNote" placeholder="e.g. shaded, fits SUV" />
+      <div style="display:flex;gap:8px;">
+        <button class="main alt" onclick="sheet(false)">Cancel</button>
+        <button class="main" onclick="publish()">Drop pin at map center</button>
+      </div>
+    </div>
+    <div class="bar">
+      <button class="main alt" onclick="locate()">My location</button>
+      <button class="main" onclick="sheet(true)">List my driveway</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+let token = null, myName = "", map, layer, sess = null, sessStart = null, myId = null;
+
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",2600); }
+async function api(path, method="GET", body){
+  const r = await fetch("/api"+path, {
+    method, headers: { "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) },
+    body: body?JSON.stringify(body):undefined
+  });
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.error||"Something went wrong");
+  return d;
+}
+
+async function doAuth(kind){
+  try{
+    const d = await api("/"+kind, "POST", {
+      name: document.getElementById("aName").value,
+      email: document.getElementById("aEmail").value,
+      password: document.getElementById("aPass").value
+    });
+    token = d.token; myName = d.name;
+    myId = JSON.parse(atob(token.split(".")[1])).id;
+    document.getElementById("authView").style.display="none";
+    const mv = document.getElementById("mainView");
+    mv.style.display="flex";
+    document.getElementById("hello").textContent = "Signed in as " + myName;
+    initMap(); refresh(); setInterval(refresh, 4000); checkSession();
+  }catch(e){ toast(e.message); }
+}
+
+function initMap(){
+  map = L.map("map",{zoomControl:false}).setView([25.2854,51.5310],14);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+  layer = L.layerGroup().addTo(map);
+  locate();
+}
+function locate(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(p=>map.setView([p.coords.latitude,p.coords.longitude],16),()=>{});
+}
+function sheet(show){ document.getElementById("sheet").style.display = show?"block":"none"; }
+
+async function publish(){
+  try{
+    const c = map.getCenter();
+    await api("/spots","POST",{
+      lat:c.lat, lng:c.lng,
+      price_cents: Math.round((parseFloat(document.getElementById("sPrice").value)||10)*100),
+      note: document.getElementById("sNote").value
+    });
+    sheet(false); refresh(); toast("Your driveway is live");
+  }catch(e){ toast(e.message); }
+}
+
+async function refresh(){
+  try{
+    const spots = await api("/spots");
+    layer.clearLayers();
+    let free=0;
+    spots.forEach(s=>{
+      const isFree = s.open && !s.taken_by;
+      if(isFree) free++;
+      const color = isFree ? "#2FBF71" : "#8A8F98";
+      const icon = L.divIcon({className:"",html:`<div style="background:${color};color:#fff;font-weight:800;font-size:12px;padding:4px 9px;border-radius:999px;border:2px solid #fff;white-space:nowrap;">$${(s.price_cents/100).toFixed(0)}</div>`,iconAnchor:[18,12]});
+      const mk = L.marker([s.lat,s.lng],{icon}).addTo(layer);
+      let b;
+      const price = (s.price_cents/100).toFixed(2);
+      if(s.owner_id===myId){
+        b = `<div class="pop"><b>Your driveway</b><div class="m">$${price}/hr · ${s.open?"open":"closed"}</div>
+          <button style="background:${s.open?"#8A8F98":"#2FBF71"}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close it":"Open it"}</button>
+          <button style="background:#E85D5D" onclick="removeSpot(${s.id})">Remove</button></div>`;
+      } else if(isFree){
+        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">$${price}/hr${s.note?" · "+s.note:""}</div>
+          <button style="background:#2FBF71" onclick="park(${s.id})">Park now</button></div>`;
+      } else {
+        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">${s.open?"Occupied":"Closed"}</div></div>`;
+      }
+      mk.bindPopup(b);
+    });
+    document.getElementById("count").textContent = "● "+free+" free now";
+  }catch(e){}
+}
+
+async function toggleSpot(id, open){ try{ await api("/spots/"+id,"PATCH",{open:!!open}); map.closePopup(); refresh(); }catch(e){ toast(e.message);} }
+async function removeSpot(id){ try{ await api("/spots/"+id,"DELETE"); map.closePopup(); refresh(); }catch(e){ toast(e.message);} }
+
+async function park(id){
+  try{
+    await api("/park/"+id,"POST");
+    map.closePopup(); checkSession(); refresh();
+  }catch(e){ toast(e.message); refresh(); }
+}
+async function checkSession(){
+  const s = await api("/me/session");
+  sess = s;
+  const el = document.getElementById("session");
+  if(s){ el.style.display="block"; document.getElementById("sessHost").textContent=s.host; sessStart = new Date(s.started_at+"Z").getTime(); }
+  else el.style.display="none";
+}
+async function endSession(){
+  try{
+    const d = await api("/end/"+sess.id,"POST");
+    sess=null; document.getElementById("session").style.display="none"; refresh();
+    if(d.pay_url) location.href = d.pay_url;
+    else toast("Session ended · $"+(d.amount_cents/100).toFixed(2)+" (payment simulated — add Stripe key)");
+  }catch(e){ toast(e.message); }
+}
+setInterval(()=>{
+  if(!sess||!sessStart) return;
+  const secs=Math.floor((Date.now()-sessStart)/1000);
+  document.getElementById("timer").textContent = String(Math.floor(secs/60)).padStart(2,"0")+":"+String(secs%60).padStart(2,"0");
+},1000);
+</script>
+</body>
+</html>
