@@ -105,6 +105,12 @@ async function initDb() {
   // Which version of the terms each user agreed to. Anyone on an older version is asked
   // again before they can book or list, because the towing and permission section is new.
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT;`);
+  // Host-set scheduling. The host writes the rules once and the system enforces them,
+  // rather than waking the host up to approve each booking while a driver waits at the kerb.
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS available_until TEXT;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS max_minutes INTEGER;`);
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expected_minutes INTEGER;`);
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS overstay_cents INTEGER DEFAULT 0;`);
   await q(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
@@ -366,6 +372,7 @@ app.get("/api/spots", async (req, res) => {
     const r = await q(`
       SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, s.address, s.address_verified,
         s.photo, s.gps_verified, (s.host_attested_at IS NOT NULL) AS attested,
+        s.available_until, s.max_minutes,
         u.name AS host, u.payouts_enabled AS host_verified,
         (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
         (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
@@ -382,7 +389,7 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy, arrival_note, attest } = req.body || {};
+    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy, arrival_note, attest, available_until, max_minutes } = req.body || {};
     // The host has to state, on the record, that they are allowed to rent this space.
     // A driveway can be subject to a lease, an association rule, or a local ordinance
     // that the owner alone knows about, and that is what gets a car towed.
@@ -461,15 +468,17 @@ app.post("/api/spots", auth, async (req, res) => {
     }
 
     const r = await q(
-      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note, geo_lat, geo_lng, host_attested_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now()) RETURNING id`,
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note, geo_lat, geo_lng, host_attested_at, available_until, max_minutes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13,$14) RETURNING id`,
       // The pin is the host's own position, not the geocoder's. We already proved they are
       // standing at the driveway, and their phone knows that spot far better than a street
       // database does: house-number lookups are often interpolated along the road and can
       // land a hundred metres from the actual house. The geocoded point is kept alongside
       // it purely as the record of what we checked against.
       [req.user.id, dLat, dLng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true,
-       String(arrival_note || "").slice(0, 400), hit.lat, hit.lng]
+       String(arrival_note || "").slice(0, 400), hit.lat, hit.lng,
+       /^\d{2}:\d{2}$/.test(String(available_until || "")) ? available_until : null,
+       Number(max_minutes) > 0 ? Math.min(1440, Math.round(Number(max_minutes))) : null]
     );
     res.json({ id: r.rows[0].id, lat: dLat, lng: dLng, address: hit.label, precise: hit.precise, gps_verified: true });
   } catch (err) {
@@ -514,6 +523,14 @@ app.patch("/api/spots/:id", auth, async (req, res) => {
     const r = await q("SELECT * FROM spots WHERE id = $1", [req.params.id]);
     const s = r.rows[0];
     if (!s || s.owner_id !== req.user.id) return res.status(403).json({ error: "Not your listing" });
+    if (typeof req.body.available_until !== "undefined") {
+      const v = /^\d{2}:\d{2}$/.test(String(req.body.available_until || "")) ? req.body.available_until : null;
+      await q("UPDATE spots SET available_until = $1 WHERE id = $2", [v, s.id]);
+    }
+    if (typeof req.body.max_minutes !== "undefined") {
+      const v = Number(req.body.max_minutes) > 0 ? Math.min(1440, Math.round(Number(req.body.max_minutes))) : null;
+      await q("UPDATE spots SET max_minutes = $1 WHERE id = $2", [v, s.id]);
+    }
     if (typeof req.body.arrival_note === "string") {
       await q("UPDATE spots SET arrival_note = $1 WHERE id = $2", [req.body.arrival_note.slice(0, 400), s.id]);
     }
@@ -800,6 +817,27 @@ app.post("/api/spots/:id/attest", auth, async (req, res) => {
 // A booking nobody ever turns up for is closed automatically and charged the minimum,
 // because otherwise a host loses their driveway for nothing.
 const HOLD_MINUTES = 20;
+// Overstay. Ten minutes of grace, then the overage costs half as much again. Money is a
+// better deterrent than an approval step, and it does not need anyone watching a phone.
+const OVERSTAY_GRACE_MINUTES = 10;
+const OVERSTAY_MULTIPLIER = 1.5;
+
+function formatMinutes(m) {
+  if (m < 60) return m + " minutes";
+  const h = Math.floor(m / 60), r = m % 60;
+  return h + (h === 1 ? " hour" : " hours") + (r ? " " + r + " minutes" : "");
+}
+
+// Minutes from now until a wall-clock time like "18:00" on the server's day.
+// Returns 0 or less if that time has already passed.
+function minutesUntilLocal(hhmm) {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  if (!isFinite(h) || !isFinite(m)) return 24 * 60;
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(h, m, 0, 0);
+  return Math.round((target.getTime() - now.getTime()) / 60000);
+}
 const NO_SHOW_GRACE_MINUTES = 15;
 
 async function sweepStaleHolds() {
@@ -958,15 +996,41 @@ app.post("/api/park/:spotId", auth, async (req, res) => {
     if (!spot.host_attested_at) {
       return res.status(409).json({ error: "This space is waiting on its host to confirm they may rent it. It cannot be booked yet.", code: "not_attested" });
     }
+    // The driver says how long they expect to stay. It is checked against the host's
+    // rules and accepted or refused on the spot, so nobody waits on a homeowner to reply.
+    let expected = Number(req.body && req.body.expected_minutes);
+    if (!isFinite(expected) || expected < 15) expected = 60;
+    expected = Math.min(1440, Math.round(expected));
+
+    if (spot.max_minutes && expected > spot.max_minutes) {
+      return res.status(409).json({
+        error: `This host allows stays of up to ${formatMinutes(spot.max_minutes)}. Choose a shorter time.`,
+        code: "too_long",
+      });
+    }
+    if (spot.available_until) {
+      const mins = minutesUntilLocal(spot.available_until);
+      if (mins <= 0) {
+        return res.status(409).json({ error: "This space is not available at this time of day.", code: "closed_now" });
+      }
+      if (expected > mins) {
+        return res.status(409).json({
+          error: `This space is only free for another ${formatMinutes(mins)} today. Choose a shorter time.`,
+          code: "too_long",
+        });
+      }
+    }
+
     // The space is held while the driver drives to it. Nothing is metered yet.
     const ins = await q(
-      `INSERT INTO sessions (spot_id, driver_id, status, hold_expires_at, driver_ack_at)
-       VALUES ($1,$2,'hold', now() + interval '${HOLD_MINUTES} minutes', now()) RETURNING id, hold_expires_at`,
-      [spot.id, req.user.id]
+      `INSERT INTO sessions (spot_id, driver_id, status, hold_expires_at, driver_ack_at, expected_minutes)
+       VALUES ($1,$2,'hold', now() + interval '${HOLD_MINUTES} minutes', now(), $3) RETURNING id, hold_expires_at`,
+      [spot.id, req.user.id, expected]
     );
     res.json({
       session_id: ins.rows[0].id,
       hold_expires_at: ins.rows[0].hold_expires_at,
+      expected_minutes: expected,
       arrival_note: spot.arrival_note || "",
     });
   } catch (err) {
@@ -1036,10 +1100,22 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
     if (!s) return res.status(404).json({ error: "No active session" });
     const spotR = await q("SELECT * FROM spots WHERE id = $1", [s.spot_id]);
     const spot = spotR.rows[0];
-    const hours = Math.max((Date.now() - billableStart(s)) / 3600000, 0.25); // 15 min minimum
-    const amount = Math.round(hours * spot.price_cents);
+    const usedMinutes = (Date.now() - billableStart(s)) / 60000;
+    const expected = Number(s.expected_minutes) || 0;
 
-    await q("UPDATE sessions SET ended_at = now(), amount_cents = $1 WHERE id = $2", [amount, s.id]);
+    // Time beyond what the driver said they needed, past the grace period, costs more.
+    // The host planned around that finish time, so the overage is not the same product.
+    let overMinutes = 0;
+    if (expected > 0) overMinutes = Math.max(0, usedMinutes - expected - OVERSTAY_GRACE_MINUTES);
+    const normalMinutes = Math.max(usedMinutes - overMinutes, 15); // 15 min minimum
+
+    const normal = (normalMinutes / 60) * spot.price_cents;
+    const over = (overMinutes / 60) * spot.price_cents * OVERSTAY_MULTIPLIER;
+    const overstayCents = Math.round(over);
+    const amount = Math.round(normal + over);
+
+    await q("UPDATE sessions SET ended_at = now(), amount_cents = $1, overstay_cents = $2 WHERE id = $3",
+      [amount, overstayCents, s.id]);
 
     if (stripe) {
       const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
@@ -1080,7 +1156,7 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
             const pi = await stripe.paymentIntents.create(params);
             await q("UPDATE sessions SET payment_status = $1, payment_error = NULL WHERE id = $2",
               [splitReady ? "paid_split" : "paid_no_split", s.id]);
-            return res.json({ amount_cents: amount, paid: true, pay_url: null, status: pi.status });
+            return res.json({ amount_cents: amount, overstay_cents: overstayCents, paid: true, pay_url: null, status: pi.status });
           } catch (chargeErr) {
             // A card can fail an hour after it was saved: expired, frozen, or the bank
             // wants the cardholder present. We record the debt and hand back a payment
