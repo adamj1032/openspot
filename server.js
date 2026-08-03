@@ -150,7 +150,7 @@ function tidyAddress(a) {
 }
 
 async function nominatim(query) {
-  const url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&countrycodes=us&q=" + encodeURIComponent(query);
+  const url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=5&countrycodes=us&q=" + encodeURIComponent(query);
   const r = await fetch(url, {
     headers: { "User-Agent": "Parkeroo/1.0 (support@parkeroo.app)", "Accept-Language": "en" },
     signal: AbortSignal.timeout(8000),
@@ -158,31 +158,53 @@ async function nominatim(query) {
   if (!r.ok) { console.error("nominatim status", r.status, "for", query); return null; }
   const data = await r.json();
   if (!Array.isArray(data) || !data.length) return null;
-  const hit = data[0], d = hit.address || {};
-  return {
-    lat: parseFloat(hit.lat),
-    lng: parseFloat(hit.lon),
-    label: hit.display_name,
-    precise: !!(d.house_number && (d.road || d.pedestrian)),
-  };
+  // A house-number match may not be the first result, so prefer one if it is anywhere in the list.
+  const scored = data.map((hit) => {
+    const d = hit.address || {};
+    return {
+      lat: parseFloat(hit.lat),
+      lng: parseFloat(hit.lon),
+      label: hit.display_name,
+      precise: !!(d.house_number && (d.road || d.pedestrian)),
+    };
+  });
+  return scored.find((x) => x.precise) || scored[0];
 }
 
 async function photon(query) {
-  const url = "https://photon.komoot.io/api/?limit=1&lang=en&q=" + encodeURIComponent(query);
+  const url = "https://photon.komoot.io/api/?limit=5&lang=en&q=" + encodeURIComponent(query);
   const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (support@parkeroo.app)" }, signal: AbortSignal.timeout(8000) });
   if (!r.ok) { console.error("photon status", r.status, "for", query); return null; }
   const data = await r.json();
-  const f = data && data.features && data.features[0];
-  if (!f) return null;
-  const p = f.properties || {};
-  const label = [p.housenumber && p.street ? `${p.housenumber} ${p.street}` : (p.street || p.name), p.city || p.district, p.state, p.postcode]
-    .filter(Boolean).join(", ");
-  return {
-    lat: f.geometry.coordinates[1],
-    lng: f.geometry.coordinates[0],
-    label: label || query,
-    precise: !!(p.housenumber && p.street),
-  };
+  const feats = (data && data.features) || [];
+  if (!feats.length) return null;
+  const scored = feats.map((f) => {
+    const p = f.properties || {};
+    const label = [p.housenumber && p.street ? `${p.housenumber} ${p.street}` : (p.street || p.name), p.city || p.district, p.state, p.postcode]
+      .filter(Boolean).join(", ");
+    return {
+      lat: f.geometry.coordinates[1],
+      lng: f.geometry.coordinates[0],
+      label: label || query,
+      precise: !!(p.housenumber && p.street),
+    };
+  });
+  return scored.find((x) => x.precise) || scored[0];
+}
+
+// The US Census geocoder is the authoritative free source for American street addresses.
+// It only ever returns matches at house-number level, has no rate limit, and needs no key,
+// so it is the right first choice here and a good backstop when OpenStreetMap is thin.
+async function census(query) {
+  const url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=json&address=" + encodeURIComponent(query);
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) { console.error("census status", r.status, "for", query); return null; }
+  const data = await r.json();
+  const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
+  if (!m || !m.coordinates) return null;
+  const lat = Number(m.coordinates.y), lng = Number(m.coordinates.x);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  return { lat, lng, label: m.matchedAddress || query, precise: true };
 }
 
 // Great-circle distance in metres between two coordinates.
@@ -197,25 +219,57 @@ function metersBetween(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
+// Successful lookups are held briefly. The address is geocoded once when the host taps
+// "Find this address" and again a moment later when they publish; without this the second
+// call can hit a rate limit and fall through to a vaguer answer than the first, which is
+// how the same address ended up precise one minute and street-level the next.
+const geoCache = new Map();
+const GEO_TTL_MS = 10 * 60 * 1000;
+
+function geoCacheGet(key) {
+  const e = geoCache.get(key);
+  if (!e) return null;
+  if (Date.now() - e.at > GEO_TTL_MS) { geoCache.delete(key); return null; }
+  return e.hit;
+}
+
+function geoCacheSet(key, hit) {
+  if (geoCache.size > 500) geoCache.clear();
+  geoCache.set(key, { hit, at: Date.now() });
+}
+
 async function geocodeAddress(address) {
   const clean = tidyAddress(address);
+  const key = clean.toLowerCase();
+  const cached = geoCacheGet(key);
+  if (cached) return cached;
+
   // Try a few phrasings: people type addresses without commas all the time.
-  // Photon copes well with unpunctuated input, so we do not try to guess where the
-  // commas belong: a wrong guess could place a pin on the wrong street entirely.
+  // We do not try to guess where the commas belong, since a wrong guess could place
+  // a pin on the wrong street entirely.
   const variants = [clean];
   if (!/usa|united states/i.test(clean)) variants.push(clean + ", USA");
 
+  let fallback = null;
+
+  // Census first: it is the most reliable for US house numbers. Then OpenStreetMap.
   for (const v of variants) {
-    for (const provider of [nominatim, photon]) {
+    for (const provider of [census, nominatim, photon]) {
       try {
         const hit = await provider(v);
-        if (hit && isFinite(hit.lat) && isFinite(hit.lng)) return hit;
+        if (!hit || !isFinite(hit.lat) || !isFinite(hit.lng)) continue;
+        // A house-number match ends the search. A vaguer one is kept only as a last resort,
+        // so a street-level answer from one provider no longer hides an exact answer from another.
+        if (hit.precise) { geoCacheSet(key, hit); return hit; }
+        if (!fallback) fallback = hit;
       } catch (e) {
-        console.error("geocode provider error:", e.message);
+        console.error("geocode provider error:", provider.name, e.message);
       }
     }
   }
-  return null;
+
+  if (fallback) geoCacheSet(key, fallback);
+  return fallback;
 }
 
 app.get("/api/geocode", auth, async (req, res) => {
