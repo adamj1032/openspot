@@ -55,6 +55,9 @@ async function initDb() {
     );`);
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_account_id TEXT;`);
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_at TIMESTAMPTZ;`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS payouts_enabled BOOLEAN DEFAULT false;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS address_verified BOOLEAN DEFAULT false;`);
   await q(`
     CREATE TABLE IF NOT EXISTS ratings (
       id SERIAL PRIMARY KEY,
@@ -118,11 +121,32 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+// ---- address geocoding (OpenStreetMap Nominatim) ----
+async function geocodeMatch(address, lat, lng) {
+  try {
+    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address);
+    const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (https://parkeroo.app)" }, signal: AbortSignal.timeout(6000) });
+    const data = await r.json();
+    if (!Array.isArray(data) || !data.length) return false;
+    const glat = parseFloat(data[0].lat), glng = parseFloat(data[0].lon);
+    // haversine distance in meters
+    const R = 6371000, toRad = (d) => d * Math.PI / 180;
+    const dLat = toRad(glat - lat), dLng = toRad(glng - lng);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat)) * Math.cos(toRad(glat)) * Math.sin(dLng/2)**2;
+    const dist = 2 * R * Math.asin(Math.sqrt(a));
+    return dist <= 250; // pin must be within 250m of the typed address
+  } catch (e) {
+    console.error("geocode:", e.message);
+    return false;
+  }
+}
+
 // ---- spots ----
 app.get("/api/spots", async (req, res) => {
   try {
     const r = await q(`
-      SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, u.name AS host,
+      SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, s.address, s.address_verified,
+        u.name AS host, u.payouts_enabled AS host_verified,
         (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
         (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
         (SELECT COUNT(*)::int FROM ratings WHERE spot_id = s.id) AS rating_count
@@ -137,15 +161,19 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { lat, lng, price_cents, note } = req.body || {};
+    const { lat, lng, price_cents, note, address } = req.body || {};
     if (typeof lat !== "number" || typeof lng !== "number" || !price_cents) {
       return res.status(400).json({ error: "Location and price are required" });
     }
+    if (!address || address.trim().length < 8) {
+      return res.status(400).json({ error: "Enter the full street address of this driveway" });
+    }
+    const verified = await geocodeMatch(address.trim(), lat, lng);
     const r = await q(
-      "INSERT INTO spots (owner_id, lat, lng, price_cents, note) VALUES ($1,$2,$3,$4,$5) RETURNING id",
-      [req.user.id, lat, lng, Math.round(price_cents), note || ""]
+      "INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+      [req.user.id, lat, lng, Math.round(price_cents), note || "", address.trim(), verified]
     );
-    res.json({ id: r.rows[0].id });
+    res.json({ id: r.rows[0].id, address_verified: verified });
   } catch (err) {
     console.error("create spot:", err.message);
     res.status(500).json({ error: "Could not create listing" });
@@ -269,6 +297,7 @@ app.get("/api/connect/status", auth, async (req, res) => {
     const acct = r.rows[0] && r.rows[0].stripe_account_id;
     if (!acct || !stripe) return res.json({ connected: false });
     const account = await stripe.accounts.retrieve(acct);
+    await q("UPDATE users SET payouts_enabled = $1 WHERE id = $2", [!!account.charges_enabled, req.user.id]);
     res.json({ connected: !!account.charges_enabled, pending: !account.charges_enabled });
   } catch (err) {
     console.error("connect status:", err.message);
