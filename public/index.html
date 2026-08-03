@@ -68,6 +68,9 @@
       <button class="main alt" onclick="locate()">My location</button>
       <button class="main" onclick="sheet(true)">List my driveway</button>
     </div>
+    <div class="bar" style="padding-top:0;">
+      <button class="main alt" id="payoutBtn" onclick="setupPayouts()" style="display:none;">Set up payouts</button>
+    </div>
   </div>
 </div>
 <div id="toast"></div>
@@ -98,7 +101,8 @@ async function doAuth(kind){
     const mv = document.getElementById("mainView");
     mv.style.display="flex";
     document.getElementById("hello").textContent = "Signed in as " + myName;
-    initMap(); refresh(); setInterval(refresh, 4000); checkSession();
+    initMap(); refresh(); setInterval(refresh, 4000); checkSession(); checkPayouts();
+    if(new URLSearchParams(location.search).get("connect")==="done") toast("Payout setup complete");
   }catch(e){ toast(e.message); }
 }
 
@@ -111,6 +115,22 @@ function initMap(){
 function locate(){
   if(!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(p=>map.setView([p.coords.latitude,p.coords.longitude],16),()=>{});
+}
+async function checkPayouts(){
+  try{
+    const s = await api("/connect/status");
+    const b = document.getElementById("payoutBtn");
+    b.style.display = "block";
+    if(s.connected){ b.textContent = "Payouts active"; b.disabled = true; b.style.opacity = 0.7; }
+    else if(s.pending){ b.textContent = "Finish payout setup"; }
+    else { b.textContent = "Set up payouts (get paid for your driveway)"; }
+  }catch(e){}
+}
+async function setupPayouts(){
+  try{
+    const d = await api("/connect/onboard","POST",{});
+    location.href = d.url;
+  }catch(e){ toast(e.message); }
 }
 function sheet(show){ document.getElementById("sheet").style.display = show?"block":"none"; }
 
