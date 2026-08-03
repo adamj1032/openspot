@@ -361,6 +361,12 @@
     font-size:14px;color:#202B47;margin-bottom:12px;}
   .msgForm{display:flex;gap:8px;margin-top:6px;}
   .msgForm input{flex:1;margin:0;}
+  #msgDock{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:1200;
+    background:#202B47;color:#fff;border-radius:999px;padding:11px 20px;cursor:pointer;
+    box-shadow:0 6px 20px rgba(32,43,71,.35);font-weight:700;font-size:14px;
+    align-items:center;gap:9px;border:2px solid #fff;}
+  #msgDock.on{display:flex;}
+  #msgDock .dockDot{width:8px;height:8px;border-radius:50%;background:#5BD08A;flex:none;}
 </style>
 </head>
 <body>
@@ -653,6 +659,11 @@
 
 </div>
 
+<div id="msgDock" onclick="openMessages()">
+  <span class="dockDot"></span>
+  <span id="msgDockText">Messages</span>
+  <span id="msgDockCount" class="msgBadge" style="display:none;">0</span>
+</div>
 <div id="installBar">
   <img src="/app-icon.png" alt="" />
   <div class="iTxt"><b>Add Parkeroo to your home screen</b><span id="iHow">One tap to the live map, no browser bar.</span></div>
@@ -748,16 +759,65 @@ async function doAuth(){
       password: document.getElementById("aPass").value,
       accepted: document.getElementById("aAgree").checked
     });
-    token = d.token; myName = d.name;
-    myId = JSON.parse(atob(token.split(".")[1])).id;
-    document.getElementById("landing").style.display="none";
-    document.getElementById("mainView").style.display="flex";
-    document.getElementById("hello").textContent = "Signed in as " + myName;
-    initMap(); refresh(); setInterval(refresh, 4000); checkSession();
-    loadThreads(); setInterval(loadThreads, 8000);
-    loadCard(); handleCardReturn();
-    if(new URLSearchParams(location.search).get("connect")==="done"){ setView("host"); toast("Payout setup complete"); }
+    signIn(d.token, d.name);
   }catch(e){ toast(e.message); }
+}
+
+/* Paying, saving a card and setting up payouts all send the browser to Stripe and back,
+   which is a full page load. The sign-in has to survive that or the driver lands on the
+   home page as a stranger with a car still in someone's driveway. */
+let appStarted = false;
+
+function saveSession(t, n){
+  try{ localStorage.setItem("pk_token", t); localStorage.setItem("pk_name", n); }catch(e){}
+}
+function clearSession(){
+  try{ localStorage.removeItem("pk_token"); localStorage.removeItem("pk_name"); }catch(e){}
+}
+
+function signIn(t, n, restored){
+  token = t; myName = n;
+  try{ myId = JSON.parse(atob(token.split(".")[1])).id; }catch(e){ myId = null; }
+  saveSession(t, n);
+  document.getElementById("landing").style.display="none";
+  document.getElementById("mainView").style.display="flex";
+  document.getElementById("hello").textContent = "Signed in as " + myName;
+  if(!appStarted){
+    appStarted = true;
+    initMap(); setInterval(refresh, 4000); setInterval(loadThreads, 8000);
+  }
+  refresh(); checkSession(); loadThreads(); loadCard(); handleCardReturn();
+
+  const p = new URLSearchParams(location.search);
+  if(p.get("connect")==="done"){ setView("host"); toast("Payout setup complete"); }
+  if(p.get("paid")==="1"){
+    history.replaceState({}, "", location.pathname + "#start");
+    toast("Payment received. Thank you.");
+    openHistory();
+  } else if(p.get("paid")==="0"){
+    history.replaceState({}, "", location.pathname + "#start");
+    toast("That payment was not completed. It is still owed on this booking.");
+    openHistory();
+  }
+}
+
+function signOut(){
+  threads=[]; const dk=document.getElementById("msgDock"); if(dk) dk.className="";
+  clearSession();
+  location.href = "/";
+}
+
+/* Come back signed in after any trip to Stripe. If the token has expired the server
+   rejects the first call and we drop back to the sign-in page as normal. */
+async function restoreSession(){
+  let t, n;
+  try{ t = localStorage.getItem("pk_token"); n = localStorage.getItem("pk_name"); }catch(e){ return false; }
+  if(!t) return false;
+  token = t;
+  try{ await api("/card"); }
+  catch(e){ token = null; clearSession(); return false; }
+  signIn(t, n || "", true);
+  return true;
 }
 
 function backToSite(){
@@ -996,6 +1056,22 @@ async function loadThreads(){
   });
   const hb=document.getElementById("msgBtnH");
   if(hb) hb.style.display = threads.length ? "inline-block" : "none";
+
+  // The docked bar is the way back into a conversation. It stays put for the whole
+  // booking, on every screen, so nobody has to remember where the thread lives.
+  const dock=document.getElementById("msgDock");
+  if(dock){
+    const open = threads.length && !!token;
+    dock.className = open ? "on" : "";
+    if(open){
+      const t = threads[0];
+      document.getElementById("msgDockText").textContent =
+        threads.length===1 ? "Message " + t.other : threads.length + " conversations";
+      const c=document.getElementById("msgDockCount");
+      c.textContent = unread;
+      c.style.display = unread ? "inline-block" : "none";
+    }
+  }
 }
 
 function openMessages(){
@@ -1295,7 +1371,11 @@ async function publish(){
 }
 
 /* ---------- bookings panel ---------- */
-function closePanel(){ document.getElementById("panel").style.display="none"; openThreadId=null; clearInterval(threadTimer); }
+function closePanel(){
+  document.getElementById("panel").style.display="none";
+  openThreadId=null; clearInterval(threadTimer);
+  loadThreads();
+}
 function showPanel(html){
   document.getElementById("panelCard").innerHTML = html + '<div style="margin-top:14px;"><button class="btn btn-ghost" style="width:100%;" onclick="closePanel()">Close</button></div>';
   document.getElementById("panel").style.display="block";
@@ -1345,6 +1425,18 @@ async function doInstall(){
 (function(){
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   if(ios && !isStandalone()) setTimeout(showInstall, 2500);
+})();
+
+/* ---------- boot ---------- */
+/* Every trip to Stripe is a full page load, so the first thing we do on arrival is put
+   the driver back where they were: signed in, on the map, with their session running. */
+(async function(){
+  const p = new URLSearchParams(location.search);
+  const returning = p.has("paid") || p.has("card") || p.has("connect");
+  const ok = await restoreSession();
+  if(!ok && returning){
+    toast("Please sign in again to pick up where you left off.");
+  }
 })();
 </script>
 </body>
