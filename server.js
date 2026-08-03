@@ -274,7 +274,27 @@ app.post("/api/connect/onboard", auth, async (req, res) => {
     const r = await q("SELECT stripe_account_id FROM users WHERE id = $1", [req.user.id]);
     let acct = r.rows[0] && r.rows[0].stripe_account_id;
     if (!acct) {
-      const account = await stripe.accounts.create({ type: "express" });
+      const uRes = await q("SELECT email, name FROM users WHERE id = $1", [req.user.id]);
+      const u = uRes.rows[0] || {};
+      const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || "https://parkeroo.app";
+      const account = await stripe.accounts.create({
+        type: "express",
+        country: "US",
+        email: u.email,
+        business_type: "individual",
+        capabilities: { transfers: { requested: true } },
+        business_profile: {
+          // pre-fill so hosts are never asked "what do you sell / what's your website"
+          mcc: "7523", // parking lots, meters and garages
+          url: base,
+          product_description: "Rents out a private residential driveway for short-term parking through Parkeroo.",
+          name: "Parkeroo host",
+        },
+        settings: {
+          payouts: { schedule: { interval: "daily", delay_days: "minimum" } },
+        },
+        metadata: { parkeroo_user_id: String(req.user.id) },
+      });
       acct = account.id;
       await q("UPDATE users SET stripe_account_id = $1 WHERE id = $2", [acct, req.user.id]);
     }
@@ -283,6 +303,7 @@ app.post("/api/connect/onboard", auth, async (req, res) => {
       refresh_url: `${base}/?connect=refresh`,
       return_url: `${base}/?connect=done`,
       type: "account_onboarding",
+      collection_options: { fields: "currently_due" },
     });
     res.json({ url: link.url });
   } catch (err) {
