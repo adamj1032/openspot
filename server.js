@@ -746,6 +746,11 @@ app.post("/api/card/setup", auth, async (req, res) => {
     const cs = await stripe.checkout.sessions.create({
       mode: "setup",
       customer,
+      // Setup mode charges nothing, but Stripe still needs a currency to work out
+      // which payment methods to offer. Without it the session is rejected outright.
+      currency: process.env.CURRENCY || "usd",
+      payment_method_types: ["card"],
+      setup_intent_data: { metadata: { user_id: String(req.user.id) } },
       success_url: `${base}/?card=1&cs={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/?card=0`,
     });
