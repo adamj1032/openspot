@@ -94,6 +94,14 @@ async function initDb() {
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS card_brand TEXT;`);
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS card_last4 TEXT;`);
   await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS payment_error TEXT;`);
+  // A booking now holds the space while the driver drives to it. The meter starts when
+  // they arrive, or when the hold runs out, whichever is first.
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'parked';`);
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS hold_expires_at TIMESTAMPTZ;`);
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS arrived_at TIMESTAMPTZ;`);
+  // Recorded consent. These are timestamps of who agreed to what, and when.
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS driver_ack_at TIMESTAMPTZ;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS host_attested_at TIMESTAMPTZ;`);
   await q(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
@@ -370,7 +378,13 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy, arrival_note } = req.body || {};
+    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy, arrival_note, attest } = req.body || {};
+    // The host has to state, on the record, that they are allowed to rent this space.
+    // A driveway can be subject to a lease, an association rule, or a local ordinance
+    // that the owner alone knows about, and that is what gets a car towed.
+    if (attest !== true) {
+      return res.status(400).json({ error: "Please confirm you are allowed to rent out this space." });
+    }
     if (!address || address.trim().length < 6) {
       return res.status(400).json({ error: "Enter the street address of your driveway" });
     }
@@ -439,8 +453,8 @@ app.post("/api/spots", auth, async (req, res) => {
     }
 
     const r = await q(
-      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note, geo_lat, geo_lng)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note, geo_lat, geo_lng, host_attested_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now()) RETURNING id`,
       // The pin is the host's own position, not the geocoder's. We already proved they are
       // standing at the driveway, and their phone knows that spot far better than a street
       // database does: house-number lookups are often interpolated along the road and can
@@ -712,6 +726,41 @@ app.get("/api/connect/status", auth, async (req, res) => {
 });
 
 // ---- parking sessions ----
+// ---- holds and the meter ----
+//
+// Booking holds the space while the driver drives to it. The meter starts when they tap
+// arrived, or when the hold runs out, whichever comes first, so holding time is never free.
+// A booking nobody ever turns up for is closed automatically and charged the minimum,
+// because otherwise a host loses their driveway for nothing.
+const HOLD_MINUTES = 20;
+const NO_SHOW_GRACE_MINUTES = 15;
+
+async function sweepStaleHolds() {
+  try {
+    // Held, expired, never arrived: the meter is now running from the moment it expired.
+    await q(`UPDATE sessions SET status = 'parked'
+             WHERE status = 'hold' AND ended_at IS NULL AND hold_expires_at < now()`);
+    // Still no arrival well past that: treat it as a no-show, release the space.
+    const r = await q(`
+      UPDATE sessions SET status = 'no_show', ended_at = now()
+      WHERE status = 'parked' AND ended_at IS NULL AND arrived_at IS NULL
+        AND hold_expires_at IS NOT NULL
+        AND hold_expires_at < now() - interval '${NO_SHOW_GRACE_MINUTES} minutes'
+      RETURNING id, spot_id`);
+    if (r.rows.length) console.log("released no-show bookings:", r.rows.map((x) => x.id).join(", "));
+  } catch (err) {
+    console.error("hold sweep:", err.message);
+  }
+}
+setInterval(sweepStaleHolds, 60 * 1000);
+
+// The clock runs from arrival, or from the moment the hold lapsed if they never tapped.
+function billableStart(sess) {
+  if (sess.arrived_at) return new Date(sess.arrived_at).getTime();
+  if (sess.hold_expires_at) return new Date(sess.hold_expires_at).getTime();
+  return new Date(sess.started_at).getTime();
+}
+
 // ---- cards on file ----
 //
 // Stripe Checkout in setup mode saves a card without charging it. That keeps card
@@ -810,14 +859,74 @@ app.post("/api/park/:spotId", auth, async (req, res) => {
     }
     const busy = await q("SELECT id FROM sessions WHERE spot_id = $1 AND ended_at IS NULL", [spot.id]);
     if (busy.rows.length) return res.status(409).json({ error: "Just taken — pick another spot" });
+    if (req.body && req.body.ack !== true) {
+      return res.status(400).json({ error: "Please confirm you have checked the photo and address." });
+    }
+    // The space is held while the driver drives to it. Nothing is metered yet.
     const ins = await q(
-      "INSERT INTO sessions (spot_id, driver_id) VALUES ($1,$2) RETURNING id",
+      `INSERT INTO sessions (spot_id, driver_id, status, hold_expires_at, driver_ack_at)
+       VALUES ($1,$2,'hold', now() + interval '${HOLD_MINUTES} minutes', now()) RETURNING id, hold_expires_at`,
       [spot.id, req.user.id]
     );
-    res.json({ session_id: ins.rows[0].id, arrival_note: spot.arrival_note || "" });
+    res.json({
+      session_id: ins.rows[0].id,
+      hold_expires_at: ins.rows[0].hold_expires_at,
+      arrival_note: spot.arrival_note || "",
+    });
   } catch (err) {
     console.error("park:", err.message);
     res.status(500).json({ error: "Could not start session" });
+  }
+});
+
+app.post("/api/arrive/:sessionId", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT * FROM sessions WHERE id = $1 AND driver_id = $2 AND ended_at IS NULL",
+      [req.params.sessionId, req.user.id]);
+    const sess = r.rows[0];
+    if (!sess) return res.status(404).json({ error: "No active booking" });
+    if (sess.arrived_at) return res.json({ ok: true, arrived_at: sess.arrived_at });
+
+    const spotR = await q("SELECT lat, lng FROM spots WHERE id = $1", [sess.spot_id]);
+    const spot = spotR.rows[0];
+    const dLat = Number(req.body && req.body.device_lat);
+    const dLng = Number(req.body && req.body.device_lng);
+    const acc = Number(req.body && req.body.device_accuracy);
+
+    // Same idea as listing: you cannot start your own meter from three miles away.
+    if (isFinite(dLat) && isFinite(dLng) && spot) {
+      const away = metersBetween(dLat, dLng, spot.lat, spot.lng);
+      const allowed = Math.min(200, 100 + (isFinite(acc) ? Math.max(0, acc) : 100));
+      if (away > allowed) {
+        return res.status(403).json({ error: "You do not appear to be at the space yet." });
+      }
+    }
+
+    const u = await q("UPDATE sessions SET status = 'parked', arrived_at = now() WHERE id = $1 RETURNING arrived_at",
+      [sess.id]);
+    res.json({ ok: true, arrived_at: u.rows[0].arrived_at });
+  } catch (err) {
+    console.error("arrive:", err.message);
+    res.status(500).json({ error: "Could not confirm your arrival" });
+  }
+});
+
+app.post("/api/cancel/:sessionId", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT * FROM sessions WHERE id = $1 AND driver_id = $2 AND ended_at IS NULL",
+      [req.params.sessionId, req.user.id]);
+    const sess = r.rows[0];
+    if (!sess) return res.status(404).json({ error: "No active booking" });
+    // Free only while the hold is still running and nobody has arrived.
+    if (sess.arrived_at || sess.status !== "hold" || new Date(sess.hold_expires_at).getTime() < Date.now()) {
+      return res.status(409).json({ error: "This booking has already started. End it instead." });
+    }
+    await q("UPDATE sessions SET ended_at = now(), amount_cents = 0, status = 'cancelled', payment_status = 'cancelled' WHERE id = $1",
+      [sess.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("cancel:", err.message);
+    res.status(500).json({ error: "Could not cancel that booking" });
   }
 });
 
@@ -831,7 +940,7 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
     if (!s) return res.status(404).json({ error: "No active session" });
     const spotR = await q("SELECT * FROM spots WHERE id = $1", [s.spot_id]);
     const spot = spotR.rows[0];
-    const hours = Math.max((Date.now() - new Date(s.started_at).getTime()) / 3600000, 0.25); // 15 min minimum
+    const hours = Math.max((Date.now() - billableStart(s)) / 3600000, 0.25); // 15 min minimum
     const amount = Math.round(hours * spot.price_cents);
 
     await q("UPDATE sessions SET ended_at = now(), amount_cents = $1 WHERE id = $2", [amount, s.id]);
@@ -1087,7 +1196,8 @@ app.get("/api/threads", auth, async (req, res) => {
 app.get("/api/me/session", auth, async (req, res) => {
   try {
     const r = await q(`
-      SELECT se.id, se.spot_id, se.started_at, sp.price_cents, u.name AS host
+      SELECT se.id, se.spot_id, se.started_at, se.status, se.hold_expires_at, se.arrived_at,
+             sp.price_cents, sp.arrival_note, u.name AS host
       FROM sessions se JOIN spots sp ON sp.id = se.spot_id JOIN users u ON u.id = sp.owner_id
       WHERE se.driver_id = $1 AND se.ended_at IS NULL
     `, [req.user.id]);
