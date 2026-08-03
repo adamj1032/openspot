@@ -198,7 +198,7 @@ app.get("/api/geocode", auth, async (req, res) => {
   const address = (req.query.address || "").trim();
   if (address.length < 6) return res.status(400).json({ error: "Enter a fuller street address" });
   const hit = await geocodeAddress(address);
-  if (!hit) return res.status(404).json({ error: "We couldn't place that address. Try it as: number, street, town, state — for example 1045 Washington Ave, Haddonfield, NJ" });
+  if (!hit) return res.status(404).json({ error: "We couldn't place that address. Write it out in full as number and street, town, state — for example 123 Main Street, Anytown, New Jersey" });
   res.json(hit);
 });
 
@@ -239,7 +239,7 @@ app.post("/api/spots", auth, async (req, res) => {
 
     const hit = await geocodeAddress(address.trim());
     if (!hit) {
-      return res.status(404).json({ error: "We couldn't place that address. Try it as: number, street, town, state — for example 1045 Washington Ave, Haddonfield, NJ" });
+      return res.status(404).json({ error: "We couldn't place that address. Write it out in full as number and street, town, state — for example 123 Main Street, Anytown, New Jersey" });
     }
 
     // Presence check: the host's device must actually be at the driveway when listing it.
