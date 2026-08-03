@@ -566,8 +566,13 @@
     <!-- ---------- DRIVER ---------- -->
     <div id="viewDrive" class="appView">
       <div id="session">
-        <div class="lbl">PARKED — <span id="sessHost"></span></div>
+        <div class="lbl"><span id="sessLbl">PARKED</span> — <span id="sessHost"></span></div>
         <div id="timer">00:00</div>
+        <div id="holdNote" style="display:none;font-size:13px;opacity:.9;margin-top:2px;"></div>
+        <div id="holdBtns" style="display:none;gap:8px;margin-top:6px;justify-content:center;">
+          <button class="btn btn-paint" style="padding:10px 18px;flex:none;" onclick="confirmArrival()">I have arrived</button>
+          <button class="btn btn-ghost" style="padding:10px 18px;flex:none;" onclick="cancelBooking()">Cancel</button>
+        </div>
         <div style="display:flex;gap:8px;margin-top:6px;justify-content:center;">
           <button class="btn btn-ghost" style="padding:10px 18px;flex:none;" onclick="openMessages()">Message host<span id="msgBadgeD" class="msgBadge" style="display:none;">0</span></button>
           <button class="btn btn-stop" style="padding:10px 22px;flex:none;" onclick="endSession()">End &amp; pay</button>
@@ -649,6 +654,11 @@
       <label>ARRIVAL INSTRUCTIONS (SHOWN ONLY AFTER SOMEONE BOOKS)</label>
       <input id="lArrival" placeholder="Left side, past the blue bin. Do not block the garage." />
       <p class="tiny">Kept private until a car is booked in, so a gate code or door detail is safe here. Good instructions are the main reason drivers do not need to message you.</p>
+
+      <label style="display:flex;gap:9px;align-items:flex-start;font-size:14px;font-weight:600;color:#202B47;margin:14px 0 4px;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="lAttest" style="width:auto;margin:3px 0 0;" />
+        <span>I own this property or have the owner's permission to rent this space, and no lease, association rule, or local ordinance stops me doing so.</span></label>
+      <p class="tiny">This matters. A driveway can be covered by a tenancy, a homeowners association, or a town rule about renting residential space, and breaking one is the usual reason a parked car gets towed.</p>
 
       <div style="display:flex;gap:8px;margin-top:6px;">
         <button class="btn btn-ghost" onclick="closeLister()">Cancel</button>
@@ -973,11 +983,14 @@ function reviewSpot(id){
     <p class="sub2" style="color:#7C8494;margin:2px 0 10px;">15 minute minimum, so the least you can pay is $${minCharge}. You are charged when you end the session.</p>
     <p style="margin:0 0 4px;"><b>${esc(s.address||"Address not given")}</b></p>
     <p class="sub2" style="color:#7C8494;margin:0 0 10px;">${esc(s.note||"")}${s.note?" · ":""}${stars}</p>
-    <div class="arrivalBox">Compare this photo and address with what is in front of you.
-      If they do not match, do not park, and report the listing. Parkeroo does not own or inspect this space.</div>
+    <div class="arrivalBox">This is private property, and you are parking on it by the host's permission only.
+      Compare this photo and address with what is in front of you, and if they do not match, do not park and report the listing.
+      Do not block a pavement, a garage, or a neighbour's access. Parkeroo does not own or inspect this space.</div>
+    <p class="sub2" style="color:#7C8494;margin:0 0 10px;">Booking holds the space for 20 minutes while you drive there.
+      Nothing is charged during the hold, and you can cancel free until the meter starts.</p>
     <label style="display:flex;gap:9px;align-items:flex-start;font-size:14px;font-weight:600;color:#202B47;margin:0 0 12px;">
       <input type="checkbox" id="parkAck" style="width:auto;margin:3px 0 0;" onchange="document.getElementById('parkGo').disabled=!this.checked;" />
-      <span>I have checked the photo and the address, and I am parking at my own risk.</span></label>
+      <span>I have checked the photo and the address. I understand this is private property, that I park at my own risk, and that Parkeroo is not responsible for towing, tickets, damage, or theft.</span></label>
     ${card.saved
       ? `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">Charged to your ${esc(card.brand)} ending ${esc(card.last4)} when you end the session. You can message ${esc(s.host)} as soon as you park.</p>
          <button class="btn btn-paint" id="parkGo" style="width:100%;" disabled onclick="park(${s.id})">Park here now</button>`
@@ -989,7 +1002,7 @@ function reviewSpot(id){
 
 async function park(id){
   try{
-    const d = await api("/park/"+id,"POST");
+    const d = await api("/park/"+id,"POST",{ack:true});
     map.closePopup();
     await checkSession(); refresh(); loadThreads();
     // Drop the driver straight into the thread, where the arrival instructions are waiting.
@@ -1017,8 +1030,19 @@ async function checkSession(){
   const s = await api("/me/session");
   sess = s;
   const el = document.getElementById("session");
-  if(s){ el.style.display="block"; document.getElementById("sessHost").textContent=s.host; sessStart = new Date(s.started_at).getTime(); }
-  else el.style.display="none";
+  if(s){
+    el.style.display="block";
+    document.getElementById("sessHost").textContent=s.host;
+    // The clock shows time on hold while driving, and metered time once you arrive.
+    sessStart = s.arrived_at ? new Date(s.arrived_at).getTime()
+      : (s.hold_expires_at ? new Date(s.hold_expires_at).getTime() : new Date(s.started_at).getTime());
+    const holding = !s.arrived_at && s.hold_expires_at && new Date(s.hold_expires_at).getTime() > Date.now();
+    document.getElementById("sessLbl").textContent = holding ? "SPACE HELD" : "PARKED";
+    document.getElementById("holdBtns").style.display = s.arrived_at ? "none" : "flex";
+    document.getElementById("holdNote").style.display = holding ? "block" : "none";
+    holdUntil = holding ? new Date(s.hold_expires_at).getTime() : null;
+  }
+  else { el.style.display="none"; holdUntil=null; }
 }
 async function endSession(){
   try{
@@ -1031,9 +1055,38 @@ async function endSession(){
 }
 setInterval(()=>{
   if(!sess||!sessStart) return;
-  const secs=Math.floor((Date.now()-sessStart)/1000);
+  if(holdUntil){
+    const left = Math.max(0, Math.floor((holdUntil-Date.now())/1000));
+    document.getElementById("timer").textContent =
+      String(Math.floor(left/60)).padStart(2,"0")+":"+String(left%60).padStart(2,"0");
+    document.getElementById("holdNote").textContent =
+      "Held for you. Nothing is charged yet. The meter starts when you arrive, or when this runs out.";
+    if(left===0){ holdUntil=null; checkSession(); }
+    return;
+  }
+  const secs=Math.max(0, Math.floor((Date.now()-sessStart)/1000));
   document.getElementById("timer").textContent = String(Math.floor(secs/60)).padStart(2,"0")+":"+String(secs%60).padStart(2,"0");
 },1000);
+
+async function confirmArrival(){
+  const pos = await getDevicePos();
+  try{
+    await api("/arrive/"+sess.id,"POST", pos ? {device_lat:pos[0], device_lng:pos[1], device_accuracy:pos[2]} : {});
+    toast("Arrival confirmed. The meter is running.");
+    checkSession();
+  }catch(e){ toast(e.message); }
+}
+
+async function cancelBooking(){
+  if(!confirm("Release this space? You will not be charged.")) return;
+  try{
+    await api("/cancel/"+sess.id,"POST");
+    sess=null; holdUntil=null;
+    document.getElementById("session").style.display="none";
+    toast("Booking cancelled. Nothing was charged.");
+    refresh(); loadThreads();
+  }catch(e){ toast(e.message); }
+}
 
 /* ---------- messages ---------- */
 /* A thread lives only as long as the booking. It opens when a car pulls in and closes
@@ -1041,6 +1094,7 @@ setInterval(()=>{
 let threads=[], openThreadId=null, threadTimer=null;
 let spotsById = {};
 let card = { saved:false, brand:"", last4:"" };
+let holdUntil = null;
 
 function esc(t){ return String(t).replace(/[&<>"]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
 
@@ -1332,6 +1386,7 @@ async function publish(){
   try{
     if(!pickedAddr){ toast("Tap Find this address first so we can place your pin"); return; }
     if(!pickedPhoto){ toast("Add a photo of the driveway — drivers need to see it"); return; }
+    if(!document.getElementById("lAttest").checked){ toast("Please confirm you are allowed to rent out this space"); return; }
     const price = Math.round((parseFloat(document.getElementById("lPrice").value)||5)*100);
 
     btn.disabled=true; btn.textContent="Checking you're here…";
@@ -1350,6 +1405,7 @@ async function publish(){
       note: document.getElementById("lNote").value,
       photo: pickedPhoto,
       arrival_note: document.getElementById("lArrival").value,
+      attest: document.getElementById("lAttest").checked,
       device_lat: pos[0], device_lng: pos[1], device_accuracy: pos[2]
     });
     closeLister();
