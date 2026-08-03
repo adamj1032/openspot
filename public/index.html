@@ -601,7 +601,8 @@
       <div class="presenceNote" id="presNote">You need to be at the driveway, with location access allowed, to publish it.</div>
 
       <label>STREET ADDRESS</label>
-      <input id="lAddr" type="text" placeholder="123 Maple Ave, Haddonfield, NJ" oninput="addrDirty()" />
+      <p class="tiny" style="margin:4px 0 0;">Format: <b>number and street, town, state</b> — separated by commas.<br/>Example: <span class="mono" style="font-size:12px;">1045 Washington Ave, Haddonfield, NJ</span></p>
+      <input id="lAddr" type="text" placeholder="1045 Washington Ave, Haddonfield, NJ" oninput="addrDirty()" />
       <button class="btn btn-tar" style="width:100%;margin-bottom:4px;" onclick="findAddr()">Find this address</button>
       <div id="addrResult" class="addrResult"></div>
 
@@ -825,8 +826,15 @@ async function reportSpot(id){
 }
 async function toggleSpot(id, open){ try{ await api("/spots/"+id,"PATCH",{open:!!open}); map.closePopup(); refresh(); loadMySpots(); }catch(e){ toast(e.message);} }
 async function removeSpot(id){
-  if(!confirm("Remove this driveway from the map?")) return;
-  try{ await api("/spots/"+id,"DELETE"); refresh(); loadMySpots(); toast("Driveway removed"); }catch(e){ toast(e.message);} }
+  if(!confirm("Take this driveway off the map? Drivers will no longer see it.")) return;
+  try{
+    const d = await api("/spots/"+id,"DELETE");
+    refresh(); loadMySpots();
+    toast(d.retired
+      ? "Taken off the map. Its past bookings stay in your earnings records."
+      : "Driveway removed.");
+  }catch(e){ toast(e.message); }
+}
 
 async function park(id){
   try{ await api("/park/"+id,"POST"); map.closePopup(); checkSession(); refresh(); }
@@ -899,14 +907,14 @@ async function loadMySpots(){
     if(!rows.length){ box.innerHTML = '<p class="hSub">No driveways yet. Add one and it appears on the map straight away.</p>'; return; }
     box.innerHTML = rows.map(s=>{
       const img = s.photo ? `<img src="${s.photo}" />` : `<img src="/brand-logo.png" style="object-fit:contain;padding:6px;" />`;
-      const stat = s.hidden ? "Hidden after reports" : (s.open ? "Open to drivers" : "Closed");
+      const stat = s.hidden ? "Off the map" : (s.open ? "Open to drivers" : "Closed");
       return `<div class="spotRow">${img}
         <div class="sInfo"><b>$${(s.price_cents/100).toFixed(2)}/hr · ${stat}</b>
           <span>${s.address||""}</span>
           <span>${s.bookings} booking${s.bookings===1?"":"s"}${s.rating?` · ★ ${s.rating}`:""}</span></div>
         <div class="sBtns">
-          <button class="miniBtn ${s.open?"off":""}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close":"Open"}</button>
-          <button class="miniBtn del" onclick="removeSpot(${s.id})">Remove</button>
+          ${s.hidden ? "" : `<button class="miniBtn ${s.open?"off":""}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close":"Open"}</button>
+          <button class="miniBtn del" onclick="removeSpot(${s.id})">Remove</button>`}
         </div></div>`;
     }).join("");
   }catch(e){ box.innerHTML = '<p class="hSub">Could not load your driveways.</p>'; }
@@ -936,7 +944,7 @@ function addrDirty(){
 async function findAddr(){
   const a = document.getElementById("lAddr").value.trim();
   const el = document.getElementById("addrResult");
-  if(a.length<6){ el.className="addrResult warn"; el.textContent="Type the full street address, including the town."; return; }
+  if(a.length<6){ el.className="addrResult warn"; el.textContent="Type the full address as number and street, town, state — for example 1045 Washington Ave, Haddonfield, NJ"; return; }
   el.className="addrResult"; el.textContent="Looking that up…";
   try{
     const hit = await api("/geocode?address="+encodeURIComponent(a));
