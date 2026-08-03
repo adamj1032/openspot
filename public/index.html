@@ -574,6 +574,10 @@
           <span><i class="dot dTaken"></i> taken or closed</span>
         </div>
       </div>
+      <div class="hCard" id="cardCard" style="margin:12px 0 0;">
+        <div class="hHead"><h3>Payment</h3></div>
+        <div id="cardBox"><p class="hSub">Checking…</p></div>
+      </div>
       <div class="bar">
         <button id="btnLocate" class="btn btn-ghost" onclick="locate()">Recenter on me</button>
         <button class="btn btn-tar" onclick="openHistory()">My bookings</button>
@@ -751,6 +755,7 @@ async function doAuth(){
     document.getElementById("hello").textContent = "Signed in as " + myName;
     initMap(); refresh(); setInterval(refresh, 4000); checkSession();
     loadThreads(); setInterval(loadThreads, 8000);
+    loadCard(); handleCardReturn();
     if(new URLSearchParams(location.search).get("connect")==="done"){ setView("host"); toast("Payout setup complete"); }
   }catch(e){ toast(e.message); }
 }
@@ -829,6 +834,7 @@ async function refresh(){
         <div style="background:${bg};color:#fff;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:12px;padding:4px 10px;border-radius:999px;border:2px solid #202B47;white-space:nowrap;">$${(s.price_cents/100).toFixed(0)}</div>
         <img src="/brand-pin.png" style="width:26px;height:auto;margin-top:-2px;${isFree?"":"filter:grayscale(1);"}" />
       </div>`,iconAnchor:[19,40]});
+      spotsById[s.id] = s;
       const mk = L.marker([s.lat,s.lng],{icon}).addTo(layer);
       const price = (s.price_cents/100).toFixed(2);
       const minCharge = (Math.max(s.price_cents*0.25,50)/100).toFixed(2);
@@ -856,7 +862,7 @@ async function refresh(){
       } else if(isFree){
         b = `<div class="pop"><b>${s.host}'s driveway</b>${photo}${priceLine}<div class="m">${s.note?s.note:""}${stars}</div>${addr}${badges}
           <div class="liab">Check the photo and the address before you pull in. Parking is arranged between you and the host; Parkeroo does not own or inspect this space.</div>
-          <button style="background:#1F9D55" onclick="park(${s.id})">Park here now</button>
+          <button style="background:#1F9D55" onclick="reviewSpot(${s.id})">See this space</button>
           <button class="rep" onclick="reportSpot(${s.id})">Report this listing</button></div>`;
       } else {
         b = `<div class="pop"><b>${s.host}'s driveway</b>${photo}<div class="m">${s.open?"Someone is parked here right now":"Closed by the host"}${stars}</div>${addr}${badges}
@@ -888,9 +894,64 @@ async function removeSpot(id){
   }catch(e){ toast(e.message); }
 }
 
+/* Booking is two steps on purpose. A single tap on a map pin is not a considered decision,
+   and the thing being agreed to is a stranger's private property. The review step puts the
+   photo, the address and the cost in front of the driver and asks them to confirm they
+   checked, which is also the moment the warning is given. */
+function reviewSpot(id){
+  const s = spotsById[id];
+  if(!s){ toast("That space is no longer on the map."); return; }
+  map.closePopup();
+  const price = (s.price_cents/100).toFixed(2);
+  const minCharge = (Math.max(s.price_cents*0.25,50)/100).toFixed(2);
+  const photo = s.photo ? `<img src="${s.photo}" style="width:100%;border-radius:12px;margin-bottom:12px;" />` : "";
+  const stars = s.rating ? `★ ${s.rating} from ${s.rating_count} booking${s.rating_count===1?"":"s"}` : "No ratings yet";
+  showPanel(`
+    <h3>${esc(s.host)}'s driveway</h3>
+    ${photo}
+    <div class="priceLine"><span class="mono big">$${price}</span><span class="per">per hour</span></div>
+    <p class="sub2" style="color:#7C8494;margin:2px 0 10px;">15 minute minimum, so the least you can pay is $${minCharge}. You are charged when you end the session.</p>
+    <p style="margin:0 0 4px;"><b>${esc(s.address||"Address not given")}</b></p>
+    <p class="sub2" style="color:#7C8494;margin:0 0 10px;">${esc(s.note||"")}${s.note?" · ":""}${stars}</p>
+    <div class="arrivalBox">Compare this photo and address with what is in front of you.
+      If they do not match, do not park, and report the listing. Parkeroo does not own or inspect this space.</div>
+    <label style="display:flex;gap:9px;align-items:flex-start;font-size:14px;font-weight:600;color:#202B47;margin:0 0 12px;">
+      <input type="checkbox" id="parkAck" style="width:auto;margin:3px 0 0;" onchange="document.getElementById('parkGo').disabled=!this.checked;" />
+      <span>I have checked the photo and the address, and I am parking at my own risk.</span></label>
+    ${card.saved
+      ? `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">Charged to your ${esc(card.brand)} ending ${esc(card.last4)} when you end the session.</p>
+         <button class="btn btn-paint" id="parkGo" style="width:100%;" disabled onclick="park(${s.id})">Park here now</button>`
+      : `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">You need a card on file before you can park. Nothing is charged until you end the session.</p>
+         <button class="btn btn-paint" id="parkGo" style="width:100%;" disabled onclick="addCard()">Add a card to park</button>`}
+    <button class="btn btn-ghost" style="width:100%;margin-top:8px;" onclick="reportSpot(${s.id})">Report this listing</button>
+  `);
+}
+
 async function park(id){
-  try{ await api("/park/"+id,"POST"); map.closePopup(); checkSession(); refresh(); }
-  catch(e){ toast(e.message); refresh(); }
+  try{
+    const d = await api("/park/"+id,"POST");
+    map.closePopup();
+    await checkSession(); refresh(); loadThreads();
+    // Drop the driver straight into the thread, where the arrival instructions are waiting.
+    if(d.session_id) openThread(d.session_id);
+    else closePanel();
+  }
+  catch(e){
+    toast(e.message);
+    if(/card/i.test(e.message)) loadCard();
+    refresh();
+  }
+}
+
+async function repin(id){
+  if(!confirm("Move this pin to where you are standing now? Do this from the driveway itself.")) return;
+  const pos = await getDevicePos();
+  if(!pos){ toast("We could not read your location."); return; }
+  try{
+    await api("/spots/"+id+"/repin","POST",{device_lat:pos[0], device_lng:pos[1], device_accuracy:pos[2]});
+    toast("Pin moved to where you are standing.");
+    refresh(); loadMySpots();
+  }catch(e){ toast(e.message); }
 }
 async function checkSession(){
   const s = await api("/me/session");
@@ -903,7 +964,8 @@ async function endSession(){
   try{
     const d = await api("/end/"+sess.id,"POST");
     sess=null; document.getElementById("session").style.display="none"; refresh();
-    if(d.pay_url) location.href = d.pay_url;
+    if(d.paid){ toast("Session ended, $"+(d.amount_cents/100).toFixed(2)+" charged to your card."); openHistory(); }
+    else if(d.pay_url){ toast(d.error || "Finishing your payment…"); setTimeout(()=>{ location.href = d.pay_url; }, 1200); }
     else { toast("Session ended · $"+(d.amount_cents/100).toFixed(2)); openHistory(); }
   }catch(e){ toast(e.message); }
 }
@@ -917,6 +979,8 @@ setInterval(()=>{
 /* A thread lives only as long as the booking. It opens when a car pulls in and closes
    when the session ends, which is why there is no inbox and no history to browse. */
 let threads=[], openThreadId=null, threadTimer=null;
+let spotsById = {};
+let card = { saved:false, brand:"", last4:"" };
 
 function esc(t){ return String(t).replace(/[&<>"]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
 
@@ -1022,6 +1086,49 @@ async function editArrival(id){
   catch(e){ toast(e.message); }
 }
 
+/* ---------- card on file ---------- */
+/* The card is saved before parking and charged when the session ends. Nothing sensitive
+   touches our server: Stripe holds the card, we hold an identifier for it. */
+async function loadCard(){
+  if(!token) return;
+  try{ card = await api("/card"); }catch(e){ return; }
+  const box = document.getElementById("cardBox");
+  if(!box) return;
+  box.innerHTML = card.saved
+    ? `<p class="hSub">Card on file: ${esc(card.brand)} ending ${esc(card.last4)}. You are charged when a session ends.</p>
+       <button class="btn btn-ghost" style="width:100%;" onclick="removeCard()">Remove card</button>`
+    : `<p class="hSub">Add a card before you park. Nothing is charged until you end a session.</p>
+       <button class="btn btn-paint" style="width:100%;" onclick="addCard()">Add a card</button>`;
+}
+
+async function addCard(){
+  try{
+    const d = await api("/card/setup","POST");
+    location.href = d.url;
+  }catch(e){ toast(e.message); }
+}
+
+async function removeCard(){
+  if(!confirm("Remove your saved card? You will need to add one again before you can park.")) return;
+  try{ await api("/card","DELETE"); toast("Card removed."); loadCard(); }
+  catch(e){ toast(e.message); }
+}
+
+// Stripe sends the driver back here after the card form.
+async function handleCardReturn(){
+  const p = new URLSearchParams(location.search);
+  if(p.get("card")==="1" && p.get("cs")){
+    try{
+      const d = await api("/card/confirm","POST",{cs:p.get("cs")});
+      toast(`Card saved: ${d.brand} ending ${d.last4}.`);
+    }catch(e){ toast(e.message); }
+    history.replaceState({}, "", location.pathname + "#start");
+    loadCard();
+  } else if(p.get("card")==="0"){
+    history.replaceState({}, "", location.pathname + "#start");
+  }
+}
+
 /* ---------- payouts ---------- */
 async function checkPayouts(){
   const pill=document.getElementById("payPill"), txt=document.getElementById("payText"),
@@ -1076,6 +1183,7 @@ async function loadMySpots(){
         <div class="sBtns">
           ${s.hidden ? "" : `<button class="miniBtn ${s.open?"off":""}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close":"Open"}</button>
           <button class="miniBtn" onclick="editArrival(${s.id})">Instructions</button>
+          <button class="miniBtn" onclick="repin(${s.id})">Fix pin</button>
           <button class="miniBtn del" onclick="removeSpot(${s.id})">Remove</button>`}
         </div></div>`;
     }).join("");
