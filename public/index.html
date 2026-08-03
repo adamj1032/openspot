@@ -796,7 +796,7 @@ function signIn(t, n, restored){
     appStarted = true;
     initMap(); setInterval(refresh, 4000); setInterval(loadThreads, 8000);
   }
-  refresh(); checkSession(); loadThreads(); loadCard(); handleCardReturn();
+  refresh(); checkSession(); loadThreads(); loadCard(); handleCardReturn(); loadConsent();
 
   const p = new URLSearchParams(location.search);
   if(p.get("connect")==="done"){ setView("host"); toast("Payout setup complete"); }
@@ -929,6 +929,10 @@ async function refresh(){
       if(s.owner_id===myId){
         b = `<div class="pop"><b>Your driveway</b>${photo}${priceLine}<div class="m">${s.open?"Open to drivers":"Closed"}${stars}</div>${addr}${badges}
           <button style="background:${s.open?"#9AA1B0":"#1F9D55"}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close it":"Open it"}</button></div>`;
+      } else if(isFree && s.attested === false){
+        b = `<div class="pop"><b>${s.host}'s driveway</b>${photo}${priceLine}${addr}
+          <div class="liab">This space is waiting on its host to confirm they may rent it, so it cannot be booked yet.</div>
+          <button class="rep" onclick="reportSpot(${s.id})">Report this listing</button></div>`;
       } else if(isFree){
         b = `<div class="pop"><b>${s.host}'s driveway</b>${photo}${priceLine}<div class="m">${s.note?s.note:""}${stars}</div>${addr}${badges}
           <div class="liab">Check the photo and the address before you pull in. Parking is arranged between you and the host; Parkeroo does not own or inspect this space.</div>
@@ -1012,6 +1016,7 @@ async function park(id){
   catch(e){
     toast(e.message);
     if(/card/i.test(e.message)) loadCard();
+    if(/terms/i.test(e.message)) loadConsent();
     refresh();
   }
 }
@@ -1214,6 +1219,61 @@ async function editArrival(id){
   if(text===null) return;
   try{ await api("/spots/"+id,"PATCH",{arrival_note:text}); toast("Instructions saved."); loadMySpots(); }
   catch(e){ toast(e.message); }
+}
+
+/* ---------- terms and permission ---------- */
+/* Accounts and listings made before the towing and permission section carry no agreement
+   to it. Rather than assume old consent covers new terms, we ask once. */
+let consent = { needs_terms:false, listings_needing_attest:[] };
+
+async function loadConsent(){
+  if(!token) return;
+  try{ consent = await api("/consent"); }catch(e){ return; }
+  if(consent.needs_terms) showTermsGate();
+  else if(consent.listings_needing_attest.length) showAttestGate();
+}
+
+function showTermsGate(){
+  showPanel(`<h3>We have updated our terms</h3>
+    <p class="sub2" style="color:#7C8494;">There is a new section covering private property, permission and towing.
+      It matters for anyone parking on or renting out a driveway, so we would rather you read it than assume.</p>
+    <p style="margin:10px 0;"><a href="/terms.html" target="_blank">Read the Terms of Service</a>
+      &middot; <a href="/privacy.html" target="_blank">Privacy Policy</a></p>
+    <label style="display:flex;gap:9px;align-items:flex-start;font-size:14px;font-weight:600;color:#202B47;margin:0 0 12px;">
+      <input type="checkbox" id="tAgree" style="width:auto;margin:3px 0 0;"
+        onchange="document.getElementById('tGo').disabled=!this.checked;" />
+      <span>I have read and agree to the updated Terms of Service and Privacy Policy.</span></label>
+    <button class="btn btn-paint" id="tGo" style="width:100%;" disabled onclick="acceptTerms()">Agree and continue</button>`);
+}
+
+async function acceptTerms(){
+  try{
+    await api("/consent/terms","POST",{accepted:true});
+    closePanel();
+    toast("Thank you.");
+    loadConsent();
+  }catch(e){ toast(e.message); }
+}
+
+function showAttestGate(){
+  const rows = consent.listings_needing_attest.map(l=>
+    `<div class="row"><div class="top2"><span>${esc(l.address||"Your driveway")}</span></div>
+      <div style="margin-top:8px;"><button class="btn btn-paint" style="width:100%;" onclick="attestSpot(${l.id})">Confirm I may rent this space</button></div></div>`
+  ).join("");
+  showPanel(`<h3>Confirm your existing driveways</h3>
+    <p class="sub2" style="color:#7C8494;">These were listed before we asked hosts about permission, so drivers cannot book them yet.
+      A driveway can be covered by a tenancy, an association rule, or a local ordinance, and that is the usual reason a parked car is towed.</p>
+    <p class="sub2" style="color:#7C8494;margin-bottom:10px;">By confirming, you state that you own the property or have the owner's permission,
+      and that nothing prevents you renting this space.</p>
+    ${rows}`);
+}
+
+async function attestSpot(id){
+  try{
+    await api("/spots/"+id+"/attest","POST",{attest:true});
+    toast("Confirmed. That driveway is bookable again.");
+    closePanel(); refresh(); loadMySpots(); loadConsent();
+  }catch(e){ toast(e.message); }
 }
 
 /* ---------- card on file ---------- */
