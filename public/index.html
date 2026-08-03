@@ -597,8 +597,8 @@
   <div id="lister" onclick="if(event.target.id==='lister') closeLister()">
     <div class="listCard">
       <h3>List your driveway</h3>
-      <p class="hSub">We place the pin from the address you give us, and we check that you are standing at the driveway while you list it.</p>
-      <div class="presenceNote" id="presNote">You must be standing in the driveway itself, with location access allowed. Listing from nearby will not work.</div>
+      <p class="hSub">We place the pin from the address you give us, and confirm your device is at that address before the listing goes live.</p>
+      <div class="presenceNote" id="presNote">Listings can only be created at the property itself. We check your device location against the address to keep people from listing driveways that are not theirs.</div>
 
       <label>STREET ADDRESS</label>
       <p class="tiny" style="margin:4px 0 0;">Write it out in full, separated by commas: <b>number and street, town, state</b>. Spell the street type and the state out rather than abbreviating them.<br/>Example: <span class="mono" style="font-size:12px;">123 Main Street, Anytown, New Jersey</span></p>
@@ -1041,7 +1041,7 @@ async function publish(){
     document.getElementById("photoPrev").style.display="none"; pickedPhoto=null; pickedAddr=null;
     document.getElementById("addrResult").textContent="";
     document.getElementById("presNote").className="presenceNote";
-    document.getElementById("presNote").textContent="You must be standing in the driveway itself, with location access allowed. Listing from nearby will not work.";
+    document.getElementById("presNote").textContent="Listings can only be created at the property itself. We check your device location against the address to keep people from listing driveways that are not theirs.";
     loadMySpots(); refresh();
     toast(d.precise ? "Your driveway is on the map, verified on site." : "Listed and verified on site. The address only resolved approximately, so it shows as an approximate location.");
   }catch(e){
