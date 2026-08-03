@@ -601,8 +601,8 @@
       <div class="presenceNote" id="presNote">You need to be at the driveway, with location access allowed, to publish it.</div>
 
       <label>STREET ADDRESS</label>
-      <p class="tiny" style="margin:4px 0 0;">Format: <b>number and street, town, state</b> — separated by commas.<br/>Example: <span class="mono" style="font-size:12px;">1045 Washington Ave, Haddonfield, NJ</span></p>
-      <input id="lAddr" type="text" placeholder="1045 Washington Ave, Haddonfield, NJ" oninput="addrDirty()" />
+      <p class="tiny" style="margin:4px 0 0;">Write it out in full, separated by commas: <b>number and street, town, state</b>. Spell the street type and the state out rather than abbreviating them.<br/>Example: <span class="mono" style="font-size:12px;">123 Main Street, Anytown, New Jersey</span></p>
+      <input id="lAddr" type="text" placeholder="123 Main Street, Anytown, New Jersey" oninput="addrDirty()" />
       <button class="btn btn-tar" style="width:100%;margin-bottom:4px;" onclick="findAddr()">Find this address</button>
       <div id="addrResult" class="addrResult"></div>
 
@@ -944,7 +944,7 @@ function addrDirty(){
 async function findAddr(){
   const a = document.getElementById("lAddr").value.trim();
   const el = document.getElementById("addrResult");
-  if(a.length<6){ el.className="addrResult warn"; el.textContent="Type the full address as number and street, town, state — for example 1045 Washington Ave, Haddonfield, NJ"; return; }
+  if(a.length<6){ el.className="addrResult warn"; el.textContent="Write the full address as number and street, town, state — for example 123 Main Street, Anytown, New Jersey"; return; }
   el.className="addrResult"; el.textContent="Looking that up…";
   try{
     const hit = await api("/geocode?address="+encodeURIComponent(a));
