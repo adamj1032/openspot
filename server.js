@@ -68,6 +68,7 @@ async function initDb() {
       created_at TIMESTAMPTZ DEFAULT now()
     );`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT false;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS gps_verified BOOLEAN DEFAULT false;`);
   await q(`
     CREATE TABLE IF NOT EXISTS ratings (
       id SERIAL PRIMARY KEY,
@@ -154,6 +155,13 @@ async function geocodeAddress(address) {
   }
 }
 
+function metersBetween(aLat, aLng, bLat, bLng) {
+  const R = 6371000, toRad = (d) => d * Math.PI / 180;
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 app.get("/api/geocode", auth, async (req, res) => {
   const address = (req.query.address || "").trim();
   if (address.length < 6) return res.status(400).json({ error: "Enter a fuller street address" });
@@ -167,7 +175,7 @@ app.get("/api/spots", async (req, res) => {
   try {
     const r = await q(`
       SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, s.address, s.address_verified,
-        s.photo, u.name AS host, u.payouts_enabled AS host_verified,
+        s.photo, s.gps_verified, u.name AS host, u.payouts_enabled AS host_verified,
         (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
         (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
         (SELECT COUNT(*)::int FROM ratings WHERE spot_id = s.id) AS rating_count
@@ -183,14 +191,17 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { price_cents, note, address, photo } = req.body || {};
+    const { price_cents, note, address, photo, device_lat, device_lng } = req.body || {};
     if (!address || address.trim().length < 6) {
       return res.status(400).json({ error: "Enter the street address of your driveway" });
     }
     if (!price_cents || price_cents < 100) {
       return res.status(400).json({ error: "Set an hourly price of at least $1" });
     }
-    if (photo && photo.length > 900000) {
+    if (!photo) {
+      return res.status(400).json({ error: "A photo of the driveway is required. Drivers need to see where they are pulling in." });
+    }
+    if (photo.length > 900000) {
       return res.status(413).json({ error: "That photo is too large. Try a smaller one." });
     }
 
@@ -199,12 +210,27 @@ app.post("/api/spots", auth, async (req, res) => {
       return res.status(404).json({ error: "We couldn't find that address. Check the spelling, and include the town and state." });
     }
 
+    // Presence check: the host's device must actually be at the driveway when listing it.
+    let gpsOk = false, gpsMeters = null;
+    if (typeof device_lat === "number" && typeof device_lng === "number") {
+      gpsMeters = metersBetween(device_lat, device_lng, hit.lat, hit.lng);
+      gpsOk = gpsMeters <= 200;
+    }
+    if (!gpsOk) {
+      return res.status(403).json({
+        error: gpsMeters === null
+          ? "We need your location to confirm you're at this driveway. Allow location access and try again from the driveway itself."
+          : `You appear to be about ${gpsMeters > 1609 ? Math.round(gpsMeters/1609) + " miles" : Math.round(gpsMeters) + " metres"} from that address. Driveways can only be listed while you are standing at them.`,
+        code: "not_present",
+      });
+    }
+
     const r = await q(
-      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo || null]
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true]
     );
-    res.json({ id: r.rows[0].id, lat: hit.lat, lng: hit.lng, address: hit.label, precise: hit.precise });
+    res.json({ id: r.rows[0].id, lat: hit.lat, lng: hit.lng, address: hit.label, precise: hit.precise, gps_verified: true });
   } catch (err) {
     console.error("create spot:", err.message);
     res.status(500).json({ error: "Could not create listing" });
