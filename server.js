@@ -58,6 +58,16 @@ async function initDb() {
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS payouts_enabled BOOLEAN DEFAULT false;`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS address TEXT DEFAULT '';`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS address_verified BOOLEAN DEFAULT false;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS photo TEXT;`);
+  await q(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id SERIAL PRIMARY KEY,
+      spot_id INTEGER NOT NULL REFERENCES spots(id),
+      reporter_id INTEGER REFERENCES users(id),
+      reason TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT false;`);
   await q(`
     CREATE TABLE IF NOT EXISTS ratings (
       id SERIAL PRIMARY KEY,
@@ -122,35 +132,47 @@ app.post("/api/login", async (req, res) => {
 });
 
 // ---- address geocoding (OpenStreetMap Nominatim) ----
-async function geocodeMatch(address, lat, lng) {
+async function geocodeAddress(address) {
   try {
-    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(address);
-    const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (https://parkeroo.app)" }, signal: AbortSignal.timeout(6000) });
+    const url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=" + encodeURIComponent(address);
+    const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (https://parkeroo.app)" }, signal: AbortSignal.timeout(8000) });
     const data = await r.json();
-    if (!Array.isArray(data) || !data.length) return false;
-    const glat = parseFloat(data[0].lat), glng = parseFloat(data[0].lon);
-    // haversine distance in meters
-    const R = 6371000, toRad = (d) => d * Math.PI / 180;
-    const dLat = toRad(glat - lat), dLng = toRad(glng - lng);
-    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat)) * Math.cos(toRad(glat)) * Math.sin(dLng/2)**2;
-    const dist = 2 * R * Math.asin(Math.sqrt(a));
-    return dist <= 250; // pin must be within 250m of the typed address
+    if (!Array.isArray(data) || !data.length) return null;
+    const hit = data[0];
+    const d = hit.address || {};
+    // only accept results precise enough to be a real street address
+    const precise = !!(d.house_number && (d.road || d.pedestrian));
+    return {
+      lat: parseFloat(hit.lat),
+      lng: parseFloat(hit.lon),
+      label: hit.display_name,
+      precise,
+    };
   } catch (e) {
     console.error("geocode:", e.message);
-    return false;
+    return null;
   }
 }
+
+app.get("/api/geocode", auth, async (req, res) => {
+  const address = (req.query.address || "").trim();
+  if (address.length < 6) return res.status(400).json({ error: "Enter a fuller street address" });
+  const hit = await geocodeAddress(address);
+  if (!hit) return res.status(404).json({ error: "We couldn't find that address. Check the spelling, and include the town and state." });
+  res.json(hit);
+});
 
 // ---- spots ----
 app.get("/api/spots", async (req, res) => {
   try {
     const r = await q(`
       SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, s.address, s.address_verified,
-        u.name AS host, u.payouts_enabled AS host_verified,
+        s.photo, u.name AS host, u.payouts_enabled AS host_verified,
         (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
         (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
         (SELECT COUNT(*)::int FROM ratings WHERE spot_id = s.id) AS rating_count
       FROM spots s JOIN users u ON u.id = s.owner_id
+      WHERE s.hidden = false
     `);
     res.json(r.rows);
   } catch (err) {
@@ -161,22 +183,62 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { lat, lng, price_cents, note, address } = req.body || {};
-    if (typeof lat !== "number" || typeof lng !== "number" || !price_cents) {
-      return res.status(400).json({ error: "Location and price are required" });
+    const { price_cents, note, address, photo } = req.body || {};
+    if (!address || address.trim().length < 6) {
+      return res.status(400).json({ error: "Enter the street address of your driveway" });
     }
-    if (!address || address.trim().length < 8) {
-      return res.status(400).json({ error: "Enter the full street address of this driveway" });
+    if (!price_cents || price_cents < 100) {
+      return res.status(400).json({ error: "Set an hourly price of at least $1" });
     }
-    const verified = await geocodeMatch(address.trim(), lat, lng);
+    if (photo && photo.length > 900000) {
+      return res.status(413).json({ error: "That photo is too large. Try a smaller one." });
+    }
+
+    const hit = await geocodeAddress(address.trim());
+    if (!hit) {
+      return res.status(404).json({ error: "We couldn't find that address. Check the spelling, and include the town and state." });
+    }
+
     const r = await q(
-      "INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
-      [req.user.id, lat, lng, Math.round(price_cents), note || "", address.trim(), verified]
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo || null]
     );
-    res.json({ id: r.rows[0].id, address_verified: verified });
+    res.json({ id: r.rows[0].id, lat: hit.lat, lng: hit.lng, address: hit.label, precise: hit.precise });
   } catch (err) {
     console.error("create spot:", err.message);
     res.status(500).json({ error: "Could not create listing" });
+  }
+});
+
+app.get("/api/my/spots", auth, async (req, res) => {
+  try {
+    const r = await q(`
+      SELECT s.*, (SELECT COUNT(*)::int FROM sessions se WHERE se.spot_id = s.id AND se.ended_at IS NOT NULL) AS bookings,
+        (SELECT ROUND(AVG(stars)::numeric,1) FROM ratings WHERE spot_id = s.id) AS rating
+      FROM spots s WHERE s.owner_id = $1 ORDER BY s.created_at DESC`, [req.user.id]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error("my spots:", err.message);
+    res.status(500).json({ error: "Could not load your driveways" });
+  }
+});
+
+app.post("/api/spots/:id/report", auth, async (req, res) => {
+  try {
+    const reason = (req.body && req.body.reason || "").trim().slice(0, 500);
+    if (!reason) return res.status(400).json({ error: "Tell us briefly what's wrong with this listing" });
+    const s = await q("SELECT id FROM spots WHERE id = $1", [req.params.id]);
+    if (!s.rows.length) return res.status(404).json({ error: "Listing not found" });
+    await q("INSERT INTO reports (spot_id, reporter_id, reason) VALUES ($1,$2,$3)", [req.params.id, req.user.id, reason]);
+    const cnt = await q("SELECT COUNT(*)::int AS n FROM reports WHERE spot_id = $1", [req.params.id]);
+    if (cnt.rows[0].n >= 2) {
+      await q("UPDATE spots SET hidden = true, open = false WHERE id = $1", [req.params.id]);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("report:", err.message);
+    res.status(500).json({ error: "Could not send that report" });
   }
 });
 
@@ -309,6 +371,30 @@ app.post("/api/connect/onboard", auth, async (req, res) => {
   } catch (err) {
     console.error("connect onboard:", err.message);
     res.status(502).json({ error: "Payout setup failed: " + err.message });
+  }
+});
+
+app.post("/api/connect/reset", auth, async (req, res) => {
+  if (!stripe) return res.status(400).json({ error: "Payments are not configured" });
+  try {
+    const r = await q("SELECT stripe_account_id FROM users WHERE id = $1", [req.user.id]);
+    const acct = r.rows[0] && r.rows[0].stripe_account_id;
+    if (!acct) return res.json({ ok: true, note: "nothing to reset" });
+
+    // Only allow a reset while setup is incomplete. A verified, payout-enabled
+    // account must never be wiped: it holds identity checks, bank details and
+    // possibly pending transfers.
+    const account = await stripe.accounts.retrieve(acct);
+    if (account.charges_enabled || account.payouts_enabled) {
+      return res.status(409).json({ error: "Your payout account is already active, so it can't be reset. Contact support if the details are wrong." });
+    }
+
+    try { await stripe.accounts.del(acct); } catch (e) { console.error("stripe delete:", e.message); }
+    await q("UPDATE users SET stripe_account_id = NULL, payouts_enabled = false WHERE id = $1", [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("connect reset:", err.message);
+    res.status(502).json({ error: "Could not reset payout setup: " + err.message });
   }
 });
 
