@@ -335,7 +335,7 @@ app.post("/api/spots", auth, async (req, res) => {
 
     if (!isFinite(dLat) || !isFinite(dLng)) {
       return res.status(403).json({
-        error: "We need your location to confirm you're at this driveway. Allow location access and try again from the driveway itself.",
+        error: "Location sharing is off, so we cannot confirm this listing. Only a person at the property can list it, and we check that every time.",
         code: "not_present",
       });
     }
@@ -352,7 +352,7 @@ app.post("/api/spots", auth, async (req, res) => {
     // A coarse fix (wifi or mast positioning rather than GPS) is not evidence of presence.
     if (!isFinite(acc) || acc > ACCURACY_LIMIT_M) {
       return res.status(403).json({
-        error: "Your phone is only giving an approximate position right now. Turn on precise location for this site, step outside, and try again.",
+        error: "Your device is not reporting a precise enough position for us to confirm this listing. Precise location is required on every listing to keep fake spaces off the map.",
         code: "low_accuracy",
       });
     }
@@ -361,11 +361,10 @@ app.post("/api/spots", auth, async (req, res) => {
     const gpsMeters = metersBetween(dLat, dLng, hit.lat, hit.lng);
 
     if (gpsMeters > allowed) {
-      const away = gpsMeters > 1609
-        ? Math.round(gpsMeters / 1609) + " miles"
-        : Math.round(gpsMeters) + " metres";
+      // Logged for our own diagnostics, never returned: the distance is a calibration hint.
+      console.warn("presence check failed:", Math.round(gpsMeters), "m, user", req.user.id);
       return res.status(403).json({
-        error: `You appear to be about ${away} from that address. A driveway can only be listed while you are standing in it, not from nearby.`,
+        error: "This listing was not published. Your device is not at the address you entered, and we only accept listings created at the property itself. This protects homeowners from having their driveways listed by other people.",
         code: "not_present",
       });
     }
