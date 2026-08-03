@@ -133,40 +133,72 @@ app.post("/api/login", async (req, res) => {
 });
 
 // ---- address geocoding (OpenStreetMap Nominatim) ----
-async function geocodeAddress(address) {
-  try {
-    const url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=" + encodeURIComponent(address);
-    const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (https://parkeroo.app)" }, signal: AbortSignal.timeout(8000) });
-    const data = await r.json();
-    if (!Array.isArray(data) || !data.length) return null;
-    const hit = data[0];
-    const d = hit.address || {};
-    // only accept results precise enough to be a real street address
-    const precise = !!(d.house_number && (d.road || d.pedestrian));
-    return {
-      lat: parseFloat(hit.lat),
-      lng: parseFloat(hit.lon),
-      label: hit.display_name,
-      precise,
-    };
-  } catch (e) {
-    console.error("geocode:", e.message);
-    return null;
-  }
+function tidyAddress(a) {
+  return a.replace(/\s+/g, " ").replace(/\s*,\s*/g, ", ").trim();
 }
 
-function metersBetween(aLat, aLng, bLat, bLng) {
-  const R = 6371000, toRad = (d) => d * Math.PI / 180;
-  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
+async function nominatim(query) {
+  const url = "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&countrycodes=us&q=" + encodeURIComponent(query);
+  const r = await fetch(url, {
+    headers: { "User-Agent": "Parkeroo/1.0 (support@parkeroo.app)", "Accept-Language": "en" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!r.ok) { console.error("nominatim status", r.status, "for", query); return null; }
+  const data = await r.json();
+  if (!Array.isArray(data) || !data.length) return null;
+  const hit = data[0], d = hit.address || {};
+  return {
+    lat: parseFloat(hit.lat),
+    lng: parseFloat(hit.lon),
+    label: hit.display_name,
+    precise: !!(d.house_number && (d.road || d.pedestrian)),
+  };
+}
+
+async function photon(query) {
+  const url = "https://photon.komoot.io/api/?limit=1&lang=en&q=" + encodeURIComponent(query);
+  const r = await fetch(url, { headers: { "User-Agent": "Parkeroo/1.0 (support@parkeroo.app)" }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) { console.error("photon status", r.status, "for", query); return null; }
+  const data = await r.json();
+  const f = data && data.features && data.features[0];
+  if (!f) return null;
+  const p = f.properties || {};
+  const label = [p.housenumber && p.street ? `${p.housenumber} ${p.street}` : (p.street || p.name), p.city || p.district, p.state, p.postcode]
+    .filter(Boolean).join(", ");
+  return {
+    lat: f.geometry.coordinates[1],
+    lng: f.geometry.coordinates[0],
+    label: label || query,
+    precise: !!(p.housenumber && p.street),
+  };
+}
+
+async function geocodeAddress(address) {
+  const clean = tidyAddress(address);
+  // Try a few phrasings: people type addresses without commas all the time.
+  // Photon copes well with unpunctuated input, so we do not try to guess where the
+  // commas belong: a wrong guess could place a pin on the wrong street entirely.
+  const variants = [clean];
+  if (!/usa|united states/i.test(clean)) variants.push(clean + ", USA");
+
+  for (const v of variants) {
+    for (const provider of [nominatim, photon]) {
+      try {
+        const hit = await provider(v);
+        if (hit && isFinite(hit.lat) && isFinite(hit.lng)) return hit;
+      } catch (e) {
+        console.error("geocode provider error:", e.message);
+      }
+    }
+  }
+  return null;
 }
 
 app.get("/api/geocode", auth, async (req, res) => {
   const address = (req.query.address || "").trim();
   if (address.length < 6) return res.status(400).json({ error: "Enter a fuller street address" });
   const hit = await geocodeAddress(address);
-  if (!hit) return res.status(404).json({ error: "We couldn't find that address. Check the spelling, and include the town and state." });
+  if (!hit) return res.status(404).json({ error: "We couldn't place that address. Try it as: number, street, town, state — for example 1045 Washington Ave, Haddonfield, NJ" });
   res.json(hit);
 });
 
@@ -207,7 +239,7 @@ app.post("/api/spots", auth, async (req, res) => {
 
     const hit = await geocodeAddress(address.trim());
     if (!hit) {
-      return res.status(404).json({ error: "We couldn't find that address. Check the spelling, and include the town and state." });
+      return res.status(404).json({ error: "We couldn't place that address. Try it as: number, street, town, state — for example 1045 Washington Ave, Haddonfield, NJ" });
     }
 
     // Presence check: the host's device must actually be at the driveway when listing it.
@@ -286,12 +318,26 @@ app.delete("/api/spots/:id", auth, async (req, res) => {
     const r = await q("SELECT * FROM spots WHERE id = $1", [req.params.id]);
     const s = r.rows[0];
     if (!s || s.owner_id !== req.user.id) return res.status(403).json({ error: "Not your listing" });
-    await q("DELETE FROM sessions WHERE spot_id = $1", [s.id]);
+
+    const live = await q("SELECT id FROM sessions WHERE spot_id = $1 AND ended_at IS NULL", [s.id]);
+    if (live.rows.length) {
+      return res.status(409).json({ error: "Someone is parked here right now. You can remove this driveway once they leave." });
+    }
+
+    const past = await q("SELECT COUNT(*)::int AS n FROM sessions WHERE spot_id = $1", [s.id]);
+    if (past.rows[0].n > 0) {
+      // Earnings history has to survive for receipts, disputes and tax records,
+      // so a driveway that has been used is retired rather than erased.
+      await q("UPDATE spots SET hidden = true, open = false WHERE id = $1", [s.id]);
+      return res.json({ ok: true, retired: true });
+    }
+
+    await q("DELETE FROM reports WHERE spot_id = $1", [s.id]).catch(()=>{});
     await q("DELETE FROM spots WHERE id = $1", [s.id]);
-    res.json({ ok: true });
+    res.json({ ok: true, retired: false });
   } catch (err) {
     console.error("delete spot:", err.message);
-    res.status(500).json({ error: "Could not remove listing" });
+    res.status(500).json({ error: "Could not remove that driveway. If a booking is still open, wait for it to end and try again." });
   }
 });
 
