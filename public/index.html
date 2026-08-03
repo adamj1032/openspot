@@ -919,7 +919,7 @@ function reviewSpot(id){
       <input type="checkbox" id="parkAck" style="width:auto;margin:3px 0 0;" onchange="document.getElementById('parkGo').disabled=!this.checked;" />
       <span>I have checked the photo and the address, and I am parking at my own risk.</span></label>
     ${card.saved
-      ? `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">Charged to your ${esc(card.brand)} ending ${esc(card.last4)} when you end the session.</p>
+      ? `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">Charged to your ${esc(card.brand)} ending ${esc(card.last4)} when you end the session. You can message ${esc(s.host)} as soon as you park.</p>
          <button class="btn btn-paint" id="parkGo" style="width:100%;" disabled onclick="park(${s.id})">Park here now</button>`
       : `<p class="sub2" style="color:#7C8494;margin:0 0 8px;">You need a card on file before you can park. Nothing is charged until you end the session.</p>
          <button class="btn btn-paint" id="parkGo" style="width:100%;" disabled onclick="addCard()">Add a card to park</button>`}
