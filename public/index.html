@@ -15,20 +15,36 @@
   .logo { font-size:19px; font-weight:900; } .logo span { color:var(--green); }
   .sub { font-size:11.5px; color:var(--muted); }
   #map { flex:1; min-height:0; }
-  .bar { padding:10px 12px; display:flex; gap:8px; }
+  .bar { padding:10px 12px 0; display:flex; gap:8px; }
+  .bar:last-of-type { padding-bottom:10px; }
   button { border:none; border-radius:12px; font-weight:800; color:#fff; cursor:pointer; }
   .main { flex:1; padding:13px 0; font-size:14.5px; background:var(--green); }
   .alt { background:var(--panel); color:var(--muted); }
   .danger { background:var(--red); }
   #authView { padding:32px 22px; }
-  #authView input { width:100%; margin:6px 0 14px; padding:12px; border-radius:10px; border:1px solid #333B47; background:var(--panel); color:#fff; font-size:15px; }
+  #authView input[type=text], #authView input[type=email], #authView input[type=password] { width:100%; margin:6px 0 14px; padding:12px; border-radius:10px; border:1px solid #333B47; background:var(--panel); color:#fff; font-size:15px; }
   #authView label { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.5px; }
+  .agree { display:flex; gap:10px; align-items:flex-start; font-size:12.5px; color:var(--muted); margin:2px 0 16px; }
+  .agree input { width:18px; height:18px; margin-top:1px; }
+  .agree a { color:var(--green); }
   #session { display:none; padding:10px; background:var(--panel); text-align:center; }
   #sheet { display:none; padding:14px 16px; background:var(--panel); }
   #sheet input { width:100%; margin:6px 0 12px; padding:11px; border-radius:10px; border:1px solid #333B47; background:var(--ink); color:#fff; font-size:15px; }
-  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; color:var(--ink); padding:9px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; }
+  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#fff; color:var(--ink); padding:9px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; max-width:90%; }
   .pop b { font-size:15px; } .pop .m { color:#565D68; font-size:12.5px; margin:2px 0 8px; }
   .pop button { width:100%; padding:10px 0; border-radius:9px; font-size:14px; margin-top:4px; }
+  #panel { display:none; position:fixed; inset:0; background:rgba(10,13,18,.72); z-index:999; }
+  #panelCard { position:absolute; left:0; right:0; bottom:0; max-height:75dvh; overflow:auto; background:var(--panel); border-radius:18px 18px 0 0; padding:18px 16px 26px; max-width:480px; margin:0 auto; }
+  #panelCard h3 { font-size:17px; margin-bottom:4px; }
+  .row { border-bottom:1px solid #262C36; padding:12px 0; font-size:13.5px; }
+  .row .top { display:flex; justify-content:space-between; font-weight:700; }
+  .row .sub2 { color:var(--muted); font-size:12px; margin-top:2px; }
+  .stars { margin-top:6px; }
+  .stars button { background:transparent; font-size:20px; padding:0 3px; color:#3D4655; }
+  .stars button.on { color:#F5C842; }
+  .bigNum { font-size:28px; font-weight:900; color:var(--green); margin:6px 0 2px; }
+  .foot { text-align:center; font-size:11px; color:#565D68; padding:6px 0 10px; }
+  .foot a { color:#565D68; }
 </style>
 </head>
 <body>
@@ -36,9 +52,13 @@
   <div id="authView">
     <div class="logo" style="font-size:26px;margin-bottom:4px;">Open<span>Spot</span></div>
     <div class="sub" style="margin-bottom:26px;">Live driveway parking near you</div>
-    <label>NAME (for sign up)</label><input id="aName" placeholder="Your name" />
-    <label>EMAIL</label><input id="aEmail" type="email" placeholder="you@example.com" />
-    <label>PASSWORD</label><input id="aPass" type="password" placeholder="••••••••" />
+    <label>NAME (for sign up)</label><input type="text" id="aName" placeholder="Your name" />
+    <label>EMAIL</label><input type="email" id="aEmail" placeholder="you@example.com" />
+    <label>PASSWORD</label><input type="password" id="aPass" placeholder="••••••••" />
+    <div class="agree">
+      <input type="checkbox" id="aAgree" />
+      <div>I am 18 or older and I agree to the <a href="/terms.html" target="_blank">Terms of Service</a> and <a href="/privacy.html" target="_blank">Privacy Policy</a></div>
+    </div>
     <div style="display:flex;gap:8px;margin-top:6px;">
       <button class="main alt" onclick="doAuth('login')">Sign in</button>
       <button class="main" onclick="doAuth('signup')">Create account</button>
@@ -68,16 +88,26 @@
       <button class="main alt" onclick="locate()">My location</button>
       <button class="main" onclick="sheet(true)">List my driveway</button>
     </div>
-    <div class="bar" style="padding-top:0;">
+    <div class="bar">
+      <button class="main alt" onclick="openHistory()">My bookings</button>
+      <button class="main alt" onclick="openEarnings()">My earnings</button>
+    </div>
+    <div class="bar" style="padding-bottom:10px;">
       <button class="main alt" id="payoutBtn" onclick="setupPayouts()" style="display:none;">Set up payouts</button>
     </div>
+    <div class="foot"><a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a></div>
   </div>
 </div>
+
+<div id="panel" onclick="if(event.target.id==='panel') closePanel()">
+  <div id="panelCard"></div>
+</div>
 <div id="toast"></div>
+
 <script>
 let token = null, myName = "", map, layer, sess = null, sessStart = null, myId = null;
 
-function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",2600); }
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",3200); }
 async function api(path, method="GET", body){
   const r = await fetch("/api"+path, {
     method, headers: { "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) },
@@ -90,10 +120,14 @@ async function api(path, method="GET", body){
 
 async function doAuth(kind){
   try{
+    if(kind==="signup" && !document.getElementById("aAgree").checked){
+      return toast("Please agree to the Terms and Privacy Policy first");
+    }
     const d = await api("/"+kind, "POST", {
       name: document.getElementById("aName").value,
       email: document.getElementById("aEmail").value,
-      password: document.getElementById("aPass").value
+      password: document.getElementById("aPass").value,
+      accepted: document.getElementById("aAgree").checked
     });
     token = d.token; myName = d.name;
     myId = JSON.parse(atob(token.split(".")[1])).id;
@@ -116,6 +150,8 @@ function locate(){
   if(!navigator.geolocation) return;
   navigator.geolocation.getCurrentPosition(p=>map.setView([p.coords.latitude,p.coords.longitude],16),()=>{});
 }
+function sheet(show){ document.getElementById("sheet").style.display = show?"block":"none"; }
+
 async function checkPayouts(){
   try{
     const s = await api("/connect/status");
@@ -132,7 +168,6 @@ async function setupPayouts(){
     location.href = d.url;
   }catch(e){ toast(e.message); }
 }
-function sheet(show){ document.getElementById("sheet").style.display = show?"block":"none"; }
 
 async function publish(){
   try{
@@ -159,15 +194,16 @@ async function refresh(){
       const mk = L.marker([s.lat,s.lng],{icon}).addTo(layer);
       let b;
       const price = (s.price_cents/100).toFixed(2);
+      const stars = s.rating ? ` · ★ ${s.rating} (${s.rating_count})` : "";
       if(s.owner_id===myId){
-        b = `<div class="pop"><b>Your driveway</b><div class="m">$${price}/hr · ${s.open?"open":"closed"}</div>
+        b = `<div class="pop"><b>Your driveway</b><div class="m">$${price}/hr · ${s.open?"open":"closed"}${stars}</div>
           <button style="background:${s.open?"#8A8F98":"#2FBF71"}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close it":"Open it"}</button>
           <button style="background:#E85D5D" onclick="removeSpot(${s.id})">Remove</button></div>`;
       } else if(isFree){
-        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">$${price}/hr${s.note?" · "+s.note:""}</div>
+        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">$${price}/hr${stars}${s.note?" · "+s.note:""}</div>
           <button style="background:#2FBF71" onclick="park(${s.id})">Park now</button></div>`;
       } else {
-        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">${s.open?"Occupied":"Closed"}</div></div>`;
+        b = `<div class="pop"><b>${s.host}'s driveway</b><div class="m">${s.open?"Occupied":"Closed"}${stars}</div></div>`;
       }
       mk.bindPopup(b);
     });
@@ -196,7 +232,7 @@ async function endSession(){
     const d = await api("/end/"+sess.id,"POST");
     sess=null; document.getElementById("session").style.display="none"; refresh();
     if(d.pay_url) location.href = d.pay_url;
-    else toast("Session ended · $"+(d.amount_cents/100).toFixed(2)+" (payment simulated — add Stripe key)");
+    else { toast("Session ended · $"+(d.amount_cents/100).toFixed(2)); openHistory(); }
   }catch(e){ toast(e.message); }
 }
 setInterval(()=>{
@@ -204,6 +240,57 @@ setInterval(()=>{
   const secs=Math.floor((Date.now()-sessStart)/1000);
   document.getElementById("timer").textContent = String(Math.floor(secs/60)).padStart(2,"0")+":"+String(secs%60).padStart(2,"0");
 },1000);
+
+// ---- panels ----
+function closePanel(){ document.getElementById("panel").style.display="none"; }
+function showPanel(html){
+  document.getElementById("panelCard").innerHTML = html + '<div style="margin-top:14px;"><button class="main alt" style="width:100%;padding:12px 0;" onclick="closePanel()">Close</button></div>';
+  document.getElementById("panel").style.display="block";
+}
+
+async function openHistory(){
+  try{
+    const rows = await api("/history");
+    let html = "<h3>My bookings</h3>";
+    if(!rows.length) html += '<div class="sub" style="padding:14px 0;">No bookings yet. Park somewhere first.</div>';
+    rows.forEach(r=>{
+      const when = new Date(r.ended_at).toLocaleString();
+      const amt = r.amount_cents!=null ? "$"+(r.amount_cents/100).toFixed(2) : "";
+      html += `<div class="row">
+        <div class="top"><span>${r.host}'s driveway</span><span>${amt}</span></div>
+        <div class="sub2">${when}${r.note?" · "+r.note:""}</div>
+        <div class="stars" data-id="${r.id}">${[1,2,3,4,5].map(n=>
+          `<button class="${r.my_stars>=n?'on':''}" onclick="rate(${r.id},${n})">★</button>`).join("")}
+        </div>
+      </div>`;
+    });
+    showPanel(html);
+  }catch(e){ toast(e.message); }
+}
+async function rate(sessionId, stars){
+  try{
+    await api("/rate/"+sessionId,"POST",{stars});
+    toast("Thanks for rating");
+    openHistory(); refresh();
+  }catch(e){ toast(e.message); }
+}
+
+async function openEarnings(){
+  try{
+    const d = await api("/earnings");
+    let html = "<h3>My earnings</h3>";
+    html += `<div class="bigNum">$${(d.host_share_cents/100).toFixed(2)}</div>
+      <div class="sub">Your 80% share of $${(d.total_cents/100).toFixed(2)} total charged across ${d.sessions.length} booking${d.sessions.length===1?"":"s"}. Paid out via Stripe once payouts are set up.</div>`;
+    d.sessions.forEach(r=>{
+      const when = new Date(r.ended_at).toLocaleString();
+      html += `<div class="row">
+        <div class="top"><span>${r.driver}</span><span>$${((r.amount_cents||0)/100*0.8).toFixed(2)}</span></div>
+        <div class="sub2">${when}</div>
+      </div>`;
+    });
+    showPanel(html);
+  }catch(e){ toast(e.message); }
+}
 </script>
 </body>
 </html>
