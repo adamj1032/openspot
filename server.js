@@ -81,6 +81,26 @@ async function initDb() {
     );`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS hidden BOOLEAN DEFAULT false;`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS gps_verified BOOLEAN DEFAULT false;`);
+  // Arrival instructions are written once by the host and shown only to a driver
+  // who has an active booking, since they can contain gate codes or door details.
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS arrival_note TEXT DEFAULT '';`);
+  await q(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL REFERENCES sessions(id),
+      sender_id INTEGER NOT NULL REFERENCES users(id),
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      read_at TIMESTAMPTZ
+    );`);
+  await q(`CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id);`);
+  await q(`
+    CREATE TABLE IF NOT EXISTS blocks (
+      blocker_id INTEGER NOT NULL REFERENCES users(id),
+      blocked_id INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (blocker_id, blocked_id)
+    );`);
   await q(`
     CREATE TABLE IF NOT EXISTS ratings (
       id SERIAL PRIMARY KEY,
@@ -280,6 +300,41 @@ app.get("/api/geocode", auth, async (req, res) => {
   res.json(hit);
 });
 
+// ---- email notifications ----
+//
+// Neither side is sitting in the app during a booking, so a message that only lands
+// on screen is a message nobody reads. Email is the cheap delivery path. If no key is
+// configured the app carries on silently: notification is a convenience, not a gate.
+const MAIL_KEY = process.env.RESEND_API_KEY || "";
+const MAIL_FROM = process.env.MAIL_FROM || "Parkeroo <notifications@parkeroo.app>";
+
+async function sendMail(to, subject, text) {
+  if (!MAIL_KEY) { console.log("mail skipped (no RESEND_API_KEY):", subject, "->", to); return; }
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + MAIL_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: MAIL_FROM, to: [to], subject, text }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) console.error("mail send failed", r.status, await r.text().catch(() => ""));
+  } catch (e) {
+    console.error("mail error:", e.message);
+  }
+}
+
+// One email per thread per recipient every few minutes, so a back-and-forth
+// does not turn into a dozen notifications.
+const mailThrottle = new Map();
+function mayNotify(sessionId, userId) {
+  const key = sessionId + ":" + userId;
+  const last = mailThrottle.get(key) || 0;
+  if (Date.now() - last < 5 * 60 * 1000) return false;
+  if (mailThrottle.size > 2000) mailThrottle.clear();
+  mailThrottle.set(key, Date.now());
+  return true;
+}
+
 // ---- spots ----
 app.get("/api/spots", async (req, res) => {
   try {
@@ -301,7 +356,7 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy } = req.body || {};
+    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy, arrival_note } = req.body || {};
     if (!address || address.trim().length < 6) {
       return res.status(400).json({ error: "Enter the street address of your driveway" });
     }
@@ -370,9 +425,10 @@ app.post("/api/spots", auth, async (req, res) => {
     }
 
     const r = await q(
-      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true]
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true,
+       String(arrival_note || "").slice(0, 400)]
     );
     res.json({ id: r.rows[0].id, lat: hit.lat, lng: hit.lng, address: hit.label, precise: hit.precise, gps_verified: true });
   } catch (err) {
@@ -417,7 +473,12 @@ app.patch("/api/spots/:id", auth, async (req, res) => {
     const r = await q("SELECT * FROM spots WHERE id = $1", [req.params.id]);
     const s = r.rows[0];
     if (!s || s.owner_id !== req.user.id) return res.status(403).json({ error: "Not your listing" });
-    await q("UPDATE spots SET open = $1 WHERE id = $2", [!!req.body.open, s.id]);
+    if (typeof req.body.arrival_note === "string") {
+      await q("UPDATE spots SET arrival_note = $1 WHERE id = $2", [req.body.arrival_note.slice(0, 400), s.id]);
+    }
+    if (typeof req.body.open !== "undefined") {
+      await q("UPDATE spots SET open = $1 WHERE id = $2", [!!req.body.open, s.id]);
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error("toggle spot:", err.message);
@@ -676,6 +737,140 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
   } catch (err) {
     console.error("end session:", err.message);
     res.status(500).json({ error: "Could not end session" });
+  }
+});
+
+// ---- messages ----
+//
+// A thread exists only for the length of a booking. It opens when a car pulls in and
+// closes when the session ends, so neither side keeps a channel to the other afterwards.
+// This is deliberately not a phone number swap: a driveway listing is a home address,
+// and a number handed over cannot be taken back.
+
+async function threadParties(sessionId, userId) {
+  const r = await q(`
+    SELECT se.id, se.driver_id, se.ended_at, sp.owner_id, sp.address, sp.arrival_note,
+           d.name AS driver_name, d.email AS driver_email,
+           h.name AS host_name, h.email AS host_email
+    FROM sessions se
+    JOIN spots sp ON sp.id = se.spot_id
+    JOIN users d ON d.id = se.driver_id
+    JOIN users h ON h.id = sp.owner_id
+    WHERE se.id = $1
+  `, [sessionId]);
+  const t = r.rows[0];
+  if (!t) return null;
+  const isDriver = t.driver_id === userId;
+  const isHost = t.owner_id === userId;
+  if (!isDriver && !isHost) return null;
+  return {
+    ...t,
+    isDriver,
+    active: !t.ended_at,
+    otherId: isDriver ? t.owner_id : t.driver_id,
+    otherName: isDriver ? t.host_name : t.driver_name,
+    otherEmail: isDriver ? t.host_email : t.driver_email,
+  };
+}
+
+app.get("/api/messages/:sessionId", auth, async (req, res) => {
+  try {
+    const t = await threadParties(req.params.sessionId, req.user.id);
+    if (!t) return res.status(403).json({ error: "Not your booking" });
+    const r = await q(
+      "SELECT id, sender_id, body, created_at FROM messages WHERE session_id = $1 ORDER BY id",
+      [t.id]
+    );
+    await q("UPDATE messages SET read_at = now() WHERE session_id = $1 AND sender_id <> $2 AND read_at IS NULL",
+      [t.id, req.user.id]);
+    res.json({
+      active: t.active,
+      me: req.user.id,
+      other: t.otherName,
+      address: t.address,
+      // Arrival instructions can hold a gate code, so only the driver in the space sees them.
+      arrival_note: t.isDriver ? (t.arrival_note || "") : "",
+      messages: r.rows,
+    });
+  } catch (err) {
+    console.error("messages get:", err.message);
+    res.status(500).json({ error: "Could not load messages" });
+  }
+});
+
+app.post("/api/messages/:sessionId", auth, async (req, res) => {
+  try {
+    const t = await threadParties(req.params.sessionId, req.user.id);
+    if (!t) return res.status(403).json({ error: "Not your booking" });
+    if (!t.active) return res.status(409).json({ error: "This booking has ended, so the thread is closed." });
+
+    const body = String(req.body && req.body.body || "").trim().slice(0, 500);
+    if (!body) return res.status(400).json({ error: "Write a message first" });
+
+    const b = await q("SELECT 1 FROM blocks WHERE blocker_id = $1 AND blocked_id = $2", [t.otherId, req.user.id]);
+    if (b.rows.length) return res.status(403).json({ error: "You cannot message this user." });
+
+    // A simple flood guard so nobody can hammer the other side.
+    const recent = await q(
+      "SELECT COUNT(*)::int AS n FROM messages WHERE session_id = $1 AND sender_id = $2 AND created_at > now() - interval '1 minute'",
+      [t.id, req.user.id]
+    );
+    if (recent.rows[0].n >= 12) return res.status(429).json({ error: "Slow down a moment." });
+
+    const ins = await q(
+      "INSERT INTO messages (session_id, sender_id, body) VALUES ($1,$2,$3) RETURNING id, sender_id, body, created_at",
+      [t.id, req.user.id, body]
+    );
+
+    if (t.otherEmail && mayNotify(t.id, t.otherId)) {
+      const who = t.isDriver ? "the driver" : "the host";
+      sendMail(
+        t.otherEmail,
+        "New message about your Parkeroo booking",
+        `You have a message from ${who} about ${t.address || "your booking"}.\n\n"${body}"\n\nOpen Parkeroo to reply. The thread closes when the booking ends.`
+      );
+    }
+
+    res.json(ins.rows[0]);
+  } catch (err) {
+    console.error("messages post:", err.message);
+    res.status(500).json({ error: "Could not send message" });
+  }
+});
+
+app.post("/api/messages/:sessionId/block", auth, async (req, res) => {
+  try {
+    const t = await threadParties(req.params.sessionId, req.user.id);
+    if (!t) return res.status(403).json({ error: "Not your booking" });
+    await q("INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+      [req.user.id, t.otherId]);
+    console.warn("user blocked:", req.user.id, "blocked", t.otherId, "session", t.id,
+      "reason:", String(req.body && req.body.reason || "").slice(0, 200));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("block:", err.message);
+    res.status(500).json({ error: "Could not block that user" });
+  }
+});
+
+// Open threads for whoever is asking, with unread counts, so the app can show a badge.
+app.get("/api/threads", auth, async (req, res) => {
+  try {
+    const r = await q(`
+      SELECT se.id, sp.address,
+        CASE WHEN se.driver_id = $1 THEN h.name ELSE d.name END AS other,
+        (SELECT COUNT(*)::int FROM messages m
+          WHERE m.session_id = se.id AND m.sender_id <> $1 AND m.read_at IS NULL) AS unread
+      FROM sessions se
+      JOIN spots sp ON sp.id = se.spot_id
+      JOIN users d ON d.id = se.driver_id
+      JOIN users h ON h.id = sp.owner_id
+      WHERE se.ended_at IS NULL AND (se.driver_id = $1 OR sp.owner_id = $1)
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error("threads:", err.message);
+    res.status(500).json({ error: "Could not load threads" });
   }
 });
 
