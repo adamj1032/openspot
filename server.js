@@ -1,4 +1,4 @@
-// OpenSpot — production backend (Postgres edition)
+// Parkeroo — production backend (Postgres edition)
 // Express + Neon Postgres + JWT auth + Stripe-ready payments
 import express from "express";
 import pg from "pg";
@@ -375,7 +375,7 @@ app.get("/api/me/session", auth, async (req, res) => {
 
 const port = process.env.PORT || 3000;
 initDb()
-  .then(() => app.listen(port, () => console.log(`OpenSpot running on http://localhost:${port}`)))
+  .then(() => app.listen(port, () => console.log(`Parkeroo running on http://localhost:${port}`)))
   .catch((err) => {
     console.error("Database init failed:", err.message);
     process.exit(1);
