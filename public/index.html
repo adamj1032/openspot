@@ -350,6 +350,17 @@
   #installBar .iTxt span { font-size:12px; color:#AEB6C8; }
   #installBar .iBtn { background:var(--paint); color:#fff; border-radius:10px; padding:10px 16px; font-size:13.5px; font-weight:800; flex:none; }
   #installBar .iX { background:transparent; color:#8892A8; font-size:16px; padding:4px 6px; flex:none; }
+  .msgBadge{display:inline-block;margin-left:7px;background:#EE5A5C;color:#fff;border-radius:999px;
+    font-size:11px;font-weight:700;padding:1px 7px;line-height:1.6;}
+  .thread{max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px 10px;}
+  .msg{max-width:82%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;}
+  .msg.them{background:#F1EEE6;color:#202B47;align-self:flex-start;border-bottom-left-radius:5px;}
+  .msg.mine{background:#202B47;color:#fff;align-self:flex-end;border-bottom-right-radius:5px;}
+  .msg .when{display:block;font-size:10px;opacity:.6;margin-top:3px;}
+  .arrivalBox{background:#FFF6E8;border:1px solid #F0DFC2;border-radius:12px;padding:11px 13px;
+    font-size:14px;color:#202B47;margin-bottom:12px;}
+  .msgForm{display:flex;gap:8px;margin-top:6px;}
+  .msgForm input{flex:1;margin:0;}
 </style>
 </head>
 <body>
@@ -551,7 +562,10 @@
       <div id="session">
         <div class="lbl">PARKED — <span id="sessHost"></span></div>
         <div id="timer">00:00</div>
-        <button class="btn btn-stop" style="margin-top:6px;padding:10px 22px;flex:none;" onclick="endSession()">End &amp; pay</button>
+        <div style="display:flex;gap:8px;margin-top:6px;justify-content:center;">
+          <button class="btn btn-ghost" style="padding:10px 18px;flex:none;" onclick="openMessages()">Message host<span id="msgBadgeD" class="msgBadge" style="display:none;">0</span></button>
+          <button class="btn btn-stop" style="padding:10px 22px;flex:none;" onclick="endSession()">End &amp; pay</button>
+        </div>
       </div>
       <div id="mapWrap">
         <div id="map"></div>
@@ -578,7 +592,9 @@
         </div>
 
         <div class="hCard">
-          <div class="hHead"><h3>Your driveways</h3><button class="btn btn-paint hAdd" onclick="openLister()">Add a driveway</button></div>
+          <div class="hHead"><h3>Your driveways</h3><div style="display:flex;gap:8px;">
+            <button id="msgBtnH" class="btn btn-ghost hAdd" style="display:none;" onclick="openMessages()">Messages<span id="msgBadgeH" class="msgBadge" style="display:none;">0</span></button>
+            <button class="btn btn-paint hAdd" onclick="openLister()">Add a driveway</button></div></div>
           <div id="myList"><p class="hSub">Loading…</p></div>
         </div>
 
@@ -619,6 +635,10 @@
 
       <label>ANYTHING DRIVERS SHOULD KNOW</label>
       <input id="lNote" placeholder="Fits an SUV, shaded, gate opens on arrival" />
+
+      <label>ARRIVAL INSTRUCTIONS (SHOWN ONLY AFTER SOMEONE BOOKS)</label>
+      <input id="lArrival" placeholder="Left side, past the blue bin. Do not block the garage." />
+      <p class="tiny">Kept private until a car is booked in, so a gate code or door detail is safe here. Good instructions are the main reason drivers do not need to message you.</p>
 
       <div style="display:flex;gap:8px;margin-top:6px;">
         <button class="btn btn-ghost" onclick="closeLister()">Cancel</button>
@@ -730,6 +750,7 @@ async function doAuth(){
     document.getElementById("mainView").style.display="flex";
     document.getElementById("hello").textContent = "Signed in as " + myName;
     initMap(); refresh(); setInterval(refresh, 4000); checkSession();
+    loadThreads(); setInterval(loadThreads, 8000);
     if(new URLSearchParams(location.search).get("connect")==="done"){ setView("host"); toast("Payout setup complete"); }
   }catch(e){ toast(e.message); }
 }
@@ -892,6 +913,115 @@ setInterval(()=>{
   document.getElementById("timer").textContent = String(Math.floor(secs/60)).padStart(2,"0")+":"+String(secs%60).padStart(2,"0");
 },1000);
 
+/* ---------- messages ---------- */
+/* A thread lives only as long as the booking. It opens when a car pulls in and closes
+   when the session ends, which is why there is no inbox and no history to browse. */
+let threads=[], openThreadId=null, threadTimer=null;
+
+function esc(t){ return String(t).replace(/[&<>"]/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+
+async function loadThreads(){
+  if(!token) return;
+  try{
+    threads = await api("/threads");
+  }catch(e){ return; }
+  const unread = threads.reduce((n,t)=>n+(t.unread||0),0);
+  [["msgBadgeD"],["msgBadgeH"]].forEach(([id])=>{
+    const b=document.getElementById(id); if(!b) return;
+    b.textContent=unread; b.style.display = unread ? "inline-block" : "none";
+  });
+  const hb=document.getElementById("msgBtnH");
+  if(hb) hb.style.display = threads.length ? "inline-block" : "none";
+}
+
+function openMessages(){
+  if(!threads.length){ toast("Messages open while a booking is running."); return; }
+  if(threads.length===1) return openThread(threads[0].id);
+  let html = "<h3>Messages</h3>";
+  threads.forEach(t=>{
+    html += `<div class="row" style="cursor:pointer;" onclick="openThread(${t.id})">
+      <div class="top2"><span>${esc(t.other)}</span>${t.unread?`<span class="amt">${t.unread} new</span>`:""}</div>
+      <div class="sub2">${esc(t.address||"")}</div></div>`;
+  });
+  showPanel(html);
+}
+
+async function openThread(id){
+  openThreadId = id;
+  await drawThread();
+  clearInterval(threadTimer);
+  threadTimer = setInterval(()=>{ if(openThreadId) drawThread(true); else clearInterval(threadTimer); }, 5000);
+}
+
+async function drawThread(quiet){
+  if(!openThreadId) return;
+  let d;
+  try{ d = await api("/messages/"+openThreadId); }
+  catch(e){ if(!quiet) toast(e.message); return; }
+
+  const box = document.getElementById("threadBox");
+  const body = d.messages.map(m=>{
+    const mine = m.sender_id === d.me;
+    const when = new Date(m.created_at).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+    return `<div class="msg ${mine?"mine":"them"}">${esc(m.body)}<span class="when">${when}</span></div>`;
+  }).join("") || '<p class="sub2" style="color:#7C8494;padding:6px 2px;">No messages yet.</p>';
+
+  if(box && quiet){
+    const stuck = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = body;
+    if(stuck) box.scrollTop = box.scrollHeight;
+    loadThreads();
+    return;
+  }
+
+  const arrival = d.arrival_note
+    ? `<div class="arrivalBox"><b>Arrival instructions</b><br/>${esc(d.arrival_note)}</div>` : "";
+  const closed = !d.active
+    ? '<p class="sub2" style="color:#7C8494;padding:6px 2px;">This booking has ended, so the thread is closed.</p>'
+    : `<div class="msgForm">
+         <input id="msgInput" maxlength="500" placeholder="Message ${esc(d.other)}" onkeydown="if(event.key==='Enter')sendMsg()" />
+         <button class="btn btn-paint" style="flex:none;padding:10px 18px;" onclick="sendMsg()">Send</button>
+       </div>
+       <p class="tiny" style="margin-top:8px;">Messages stay in Parkeroo and close with the booking.
+         <a href="#" onclick="blockUser();return false;" style="color:#EE5A5C;">Block and report</a></p>`;
+
+  showPanel(`<h3>${esc(d.other)}</h3>
+    <p class="sub2" style="color:#7C8494;margin:0 0 10px;">${esc(d.address||"")}</p>
+    ${arrival}
+    <div class="thread" id="threadBox">${body}</div>
+    ${closed}`);
+
+  const b = document.getElementById("threadBox");
+  if(b) b.scrollTop = b.scrollHeight;
+  loadThreads();
+}
+
+async function sendMsg(){
+  const el = document.getElementById("msgInput");
+  const body = el && el.value.trim();
+  if(!body) return;
+  el.value = "";
+  try{ await api("/messages/"+openThreadId,"POST",{body}); await drawThread(true); }
+  catch(e){ toast(e.message); }
+}
+
+async function blockUser(){
+  if(!confirm("Block this person and report them to Parkeroo? They will not be able to message you again.")) return;
+  const reason = prompt("What happened? This goes to us, not to them.") || "";
+  try{
+    await api("/messages/"+openThreadId+"/block","POST",{reason});
+    closePanel(); openThreadId=null;
+    toast("Blocked. Thank you for telling us.");
+  }catch(e){ toast(e.message); }
+}
+
+async function editArrival(id){
+  const text = prompt("Arrival instructions. Drivers see these only after they book, so a gate code is safe here.");
+  if(text===null) return;
+  try{ await api("/spots/"+id,"PATCH",{arrival_note:text}); toast("Instructions saved."); loadMySpots(); }
+  catch(e){ toast(e.message); }
+}
+
 /* ---------- payouts ---------- */
 async function checkPayouts(){
   const pill=document.getElementById("payPill"), txt=document.getElementById("payText"),
@@ -945,6 +1075,7 @@ async function loadMySpots(){
           <span>${s.bookings} booking${s.bookings===1?"":"s"}${s.rating?` · ★ ${s.rating}`:""}</span></div>
         <div class="sBtns">
           ${s.hidden ? "" : `<button class="miniBtn ${s.open?"off":""}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close":"Open"}</button>
+          <button class="miniBtn" onclick="editArrival(${s.id})">Instructions</button>
           <button class="miniBtn del" onclick="removeSpot(${s.id})">Remove</button>`}
         </div></div>`;
     }).join("");
@@ -1034,10 +1165,12 @@ async function publish(){
       price_cents: price,
       note: document.getElementById("lNote").value,
       photo: pickedPhoto,
+      arrival_note: document.getElementById("lArrival").value,
       device_lat: pos[0], device_lng: pos[1], device_accuracy: pos[2]
     });
     closeLister();
     document.getElementById("lAddr").value=""; document.getElementById("lNote").value="";
+    document.getElementById("lArrival").value="";
     document.getElementById("photoPrev").style.display="none"; pickedPhoto=null; pickedAddr=null;
     document.getElementById("addrResult").textContent="";
     document.getElementById("presNote").className="presenceNote";
@@ -1054,7 +1187,7 @@ async function publish(){
 }
 
 /* ---------- bookings panel ---------- */
-function closePanel(){ document.getElementById("panel").style.display="none"; }
+function closePanel(){ document.getElementById("panel").style.display="none"; openThreadId=null; clearInterval(threadTimer); }
 function showPanel(html){
   document.getElementById("panelCard").innerHTML = html + '<div style="margin-top:14px;"><button class="btn btn-ghost" style="width:100%;" onclick="closePanel()">Close</button></div>';
   document.getElementById("panel").style.display="block";
