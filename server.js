@@ -9,6 +9,20 @@ import "dotenv/config";
 
 const app = express();
 app.use(express.json({ limit: "4mb" }));
+// The native app loads its interface from capacitor://localhost, which counts as a
+// different origin, so the API has to say plainly that those requests are allowed.
+app.use((req, res, next) => {
+  const origin = req.headers.origin || "";
+  if (/^(capacitor|ionic):\/\//.test(origin) || origin === "https://parkeroo.app") {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(express.static("public"));
 
 // Body-parser failures (oversized photo, malformed JSON) must come back as JSON,
