@@ -561,7 +561,7 @@
         </div>
       </div>
       <div class="bar">
-        <button class="btn btn-ghost" onclick="locate()">Recenter on me</button>
+        <button id="btnLocate" class="btn btn-ghost" onclick="locate()">Recenter on me</button>
         <button class="btn btn-tar" onclick="openHistory()">My bookings</button>
       </div>
     </div>
@@ -642,7 +642,7 @@
 <div id="toast"></div>
 
 <script>
-let token=null, myName="", map, layer, sess=null, sessStart=null, myId=null, mode="in", firstFit=true, userPos=null;
+let token=null, myName="", map, layer, sess=null, sessStart=null, myId=null, mode="in", firstFit=true, userPos=null, meMarker=null;
 let appView="drive", pickedAddr=null, pickedPhoto=null;
 
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",4000); }
@@ -757,11 +757,41 @@ function initMap(){
   map = L.map("map",{zoomControl:false}).setView([39.5,-98.35],4);
   L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© OpenStreetMap · © CARTO"}).addTo(map);
   layer = L.layerGroup().addTo(map);
-  locate();
+  locate(true);
 }
-function locate(){
-  if(!navigator.geolocation) return;
-  navigator.geolocation.getCurrentPosition(p=>{ firstFit=false; userPos=[p.coords.latitude,p.coords.longitude]; map.setView(userPos,16); refresh(); },()=>{});
+function showMeMarker(){
+  if(!userPos || !map) return;
+  const icon = L.divIcon({className:"", iconSize:[18,18], iconAnchor:[9,9], html:
+    '<div style="width:14px;height:14px;border-radius:50%;background:#2E7DF6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(46,125,246,.35),0 2px 6px rgba(32,43,71,.4);"></div>'});
+  if(meMarker) meMarker.setLatLng(userPos);
+  else meMarker = L.marker(userPos,{icon, zIndexOffset:1000}).addTo(map).bindPopup("You are here");
+}
+function locate(quiet){
+  const btn = document.getElementById("btnLocate");
+  const reset = () => { if(btn){ btn.disabled=false; btn.textContent="Recenter on me"; } };
+  if(!navigator.geolocation){
+    if(!quiet) toast("This browser cannot share your location.");
+    return;
+  }
+  if(btn){ btn.disabled=true; btn.textContent="Finding you…"; }
+  navigator.geolocation.getCurrentPosition(
+    p=>{
+      firstFit=false;
+      userPos=[p.coords.latitude, p.coords.longitude];
+      map.setView(userPos, 16);
+      showMeMarker();
+      refresh();
+      reset();
+    },
+    err=>{
+      reset();
+      if(quiet) return;
+      if(err && err.code === 1) toast("Location is blocked for this site. Allow it in your browser settings, then tap again.");
+      else if(err && err.code === 3) toast("Finding you took too long. Try again, ideally outdoors.");
+      else toast("We could not read your location just now. Try again in a moment.");
+    },
+    { enableHighAccuracy:true, timeout:12000, maximumAge:60000 }
+  );
 }
 
 async function refresh(){
@@ -815,6 +845,7 @@ async function refresh(){
     });
     document.getElementById("count").textContent = free+" FREE";
     if(firstFit && pts.length){ firstFit=false; map.fitBounds(pts,{padding:[40,40],maxZoom:15}); }
+    showMeMarker();
   }catch(e){}
 }
 
@@ -1015,7 +1046,8 @@ async function publish(){
     toast(d.precise ? "Your driveway is on the map, verified on site." : "Listed and verified on site. The address only resolved approximately, so it shows as an approximate location.");
   }catch(e){
     const note=document.getElementById("presNote");
-    if(/standing at them|location to confirm/i.test(e.message)){ note.className="presenceNote warn"; note.textContent=e.message; }
+    note.className="presenceNote warn";
+    note.textContent=e.message || "Something went wrong publishing that. Try again.";
     toast(e.message);
   }
   finally{ btn.disabled=false; btn.textContent="Publish driveway"; }
