@@ -53,6 +53,7 @@ async function initDb() {
       amount_cents INTEGER,
       payment_status TEXT DEFAULT 'pending'
     );`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_account_id TEXT;`);
   console.log("Database ready");
 }
 
@@ -165,6 +166,46 @@ app.delete("/api/spots/:id", auth, async (req, res) => {
   }
 });
 
+// ---- host payouts (Stripe Connect) ----
+const COMMISSION = 0.20; // platform keeps 20%
+
+app.post("/api/connect/onboard", auth, async (req, res) => {
+  if (!stripe) return res.status(400).json({ error: "Payments are not configured" });
+  try {
+    const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
+    const r = await q("SELECT stripe_account_id FROM users WHERE id = $1", [req.user.id]);
+    let acct = r.rows[0] && r.rows[0].stripe_account_id;
+    if (!acct) {
+      const account = await stripe.accounts.create({ type: "express" });
+      acct = account.id;
+      await q("UPDATE users SET stripe_account_id = $1 WHERE id = $2", [acct, req.user.id]);
+    }
+    const link = await stripe.accountLinks.create({
+      account: acct,
+      refresh_url: `${base}/?connect=refresh`,
+      return_url: `${base}/?connect=done`,
+      type: "account_onboarding",
+    });
+    res.json({ url: link.url });
+  } catch (err) {
+    console.error("connect onboard:", err.message);
+    res.status(502).json({ error: "Payout setup failed: " + err.message });
+  }
+});
+
+app.get("/api/connect/status", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT stripe_account_id FROM users WHERE id = $1", [req.user.id]);
+    const acct = r.rows[0] && r.rows[0].stripe_account_id;
+    if (!acct || !stripe) return res.json({ connected: false });
+    const account = await stripe.accounts.retrieve(acct);
+    res.json({ connected: !!account.charges_enabled, pending: !account.charges_enabled });
+  } catch (err) {
+    console.error("connect status:", err.message);
+    res.json({ connected: false });
+  }
+});
+
 // ---- parking sessions ----
 app.post("/api/park/:spotId", auth, async (req, res) => {
   try {
@@ -202,20 +243,37 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
     if (stripe) {
       try {
         const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
-        const checkout = await stripe.checkout.sessions.create({
+        const charged = Math.max(amount, 50); // Stripe minimum charge is $0.50
+        const hostR = await q("SELECT stripe_account_id FROM users WHERE id = $1", [spot.owner_id]);
+        const hostAcct = hostR.rows[0] && hostR.rows[0].stripe_account_id;
+        let splitReady = false;
+        if (hostAcct) {
+          try {
+            const acct = await stripe.accounts.retrieve(hostAcct);
+            splitReady = !!acct.charges_enabled;
+          } catch (e) { splitReady = false; }
+        }
+        const params = {
           mode: "payment",
           line_items: [{
             price_data: {
               currency: process.env.CURRENCY || "usd",
               product_data: { name: "Driveway parking" },
-              unit_amount: Math.max(amount, 50), // Stripe minimum charge is $0.50
+              unit_amount: charged,
             },
             quantity: 1,
           }],
           success_url: `${base}/?paid=1`,
           cancel_url: `${base}/?paid=0`,
-        });
-        await q("UPDATE sessions SET payment_status = 'checkout_created' WHERE id = $1", [s.id]);
+        };
+        if (splitReady) {
+          params.payment_intent_data = {
+            application_fee_amount: Math.round(charged * COMMISSION),
+            transfer_data: { destination: hostAcct },
+          };
+        }
+        const checkout = await stripe.checkout.sessions.create(params);
+        await q("UPDATE sessions SET payment_status = $1 WHERE id = $2", [splitReady ? 'checkout_split' : 'checkout_no_split', s.id]);
         return res.json({ amount_cents: amount, pay_url: checkout.url });
       } catch (err) {
         console.error("Stripe checkout failed:", err.message);
