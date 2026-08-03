@@ -84,6 +84,16 @@ async function initDb() {
   // Arrival instructions are written once by the host and shown only to a driver
   // who has an active booking, since they can contain gate codes or door details.
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS arrival_note TEXT DEFAULT '';`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS geo_lat DOUBLE PRECISION;`);
+  await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS geo_lng DOUBLE PRECISION;`);
+  // Card on file. Drivers save a card before they can park, and the fare is taken
+  // off that card when the session ends rather than by sending them to a payment page
+  // with a car already sitting in someone's driveway.
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method_id TEXT;`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS card_brand TEXT;`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS card_last4 TEXT;`);
+  await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS payment_error TEXT;`);
   await q(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
@@ -224,7 +234,11 @@ async function census(query) {
   if (!m || !m.coordinates) return null;
   const lat = Number(m.coordinates.y), lng = Number(m.coordinates.x);
   if (!isFinite(lat) || !isFinite(lng)) return null;
-  return { lat, lng, label: m.matchedAddress || query, precise: true };
+  const label = String(m.matchedAddress || query)
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (c) => c.toUpperCase())
+    .replace(/\b(Nj|Ny|Pa|De|Md|Ct|Ma|Va|Ca|Tx|Fl)\b/g, (x) => x.toUpperCase());
+  return { lat, lng, label, precise: true };
 }
 
 // Great-circle distance in metres between two coordinates.
@@ -425,12 +439,17 @@ app.post("/api/spots", auth, async (req, res) => {
     }
 
     const r = await q(
-      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [req.user.id, hit.lat, hit.lng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true,
-       String(arrival_note || "").slice(0, 400)]
+      `INSERT INTO spots (owner_id, lat, lng, price_cents, note, address, address_verified, photo, gps_verified, arrival_note, geo_lat, geo_lng)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      // The pin is the host's own position, not the geocoder's. We already proved they are
+      // standing at the driveway, and their phone knows that spot far better than a street
+      // database does: house-number lookups are often interpolated along the road and can
+      // land a hundred metres from the actual house. The geocoded point is kept alongside
+      // it purely as the record of what we checked against.
+      [req.user.id, dLat, dLng, Math.round(price_cents), note || "", hit.label, hit.precise, photo, true,
+       String(arrival_note || "").slice(0, 400), hit.lat, hit.lng]
     );
-    res.json({ id: r.rows[0].id, lat: hit.lat, lng: hit.lng, address: hit.label, precise: hit.precise, gps_verified: true });
+    res.json({ id: r.rows[0].id, lat: dLat, lng: dLng, address: hit.label, precise: hit.precise, gps_verified: true });
   } catch (err) {
     console.error("create spot:", err.message);
     res.status(500).json({ error: "Could not create listing" });
@@ -483,6 +502,41 @@ app.patch("/api/spots/:id", auth, async (req, res) => {
   } catch (err) {
     console.error("toggle spot:", err.message);
     res.status(500).json({ error: "Could not update listing" });
+  }
+});
+
+// Listings made before the pin came from the device still sit wherever the geocoder put
+// them. A host can correct one, but only their own, and only from the property itself.
+app.post("/api/spots/:id/repin", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT * FROM spots WHERE id = $1", [req.params.id]);
+    const spot = r.rows[0];
+    if (!spot || spot.owner_id !== req.user.id) return res.status(403).json({ error: "Not your listing" });
+
+    const dLat = Number(req.body && req.body.device_lat);
+    const dLng = Number(req.body && req.body.device_lng);
+    const acc = Number(req.body && req.body.device_accuracy);
+    if (!isFinite(dLat) || !isFinite(dLng)) {
+      return res.status(403).json({ error: "Location sharing is off, so the pin was not moved." });
+    }
+    if (!isFinite(acc) || acc > 100) {
+      return res.status(403).json({ error: "Your device is not reporting a precise enough position to move this pin." });
+    }
+
+    const hit = await geocodeAddress(spot.address || "");
+    if (hit && hit.precise) {
+      const away = metersBetween(dLat, dLng, hit.lat, hit.lng);
+      if (away > Math.min(120, 60 + Math.max(0, acc))) {
+        console.warn("repin refused:", Math.round(away), "m, spot", spot.id);
+        return res.status(403).json({ error: "You are not at the address on this listing, so the pin was not moved." });
+      }
+    }
+
+    await q("UPDATE spots SET lat = $1, lng = $2 WHERE id = $3", [dLat, dLng, spot.id]);
+    res.json({ ok: true, lat: dLat, lng: dLng });
+  } catch (err) {
+    console.error("repin:", err.message);
+    res.status(500).json({ error: "Could not move the pin" });
   }
 });
 
@@ -658,18 +712,104 @@ app.get("/api/connect/status", auth, async (req, res) => {
 });
 
 // ---- parking sessions ----
+// ---- cards on file ----
+//
+// Stripe Checkout in setup mode saves a card without charging it. That keeps card
+// details off our server entirely: we only ever hold Stripe's identifiers for them.
+
+async function ensureCustomer(userId) {
+  const r = await q("SELECT id, email, name, stripe_customer_id FROM users WHERE id = $1", [userId]);
+  const u = r.rows[0];
+  if (!u) throw new Error("no such user");
+  if (u.stripe_customer_id) return u.stripe_customer_id;
+  const c = await stripe.customers.create({ email: u.email, name: u.name, metadata: { user_id: String(u.id) } });
+  await q("UPDATE users SET stripe_customer_id = $1 WHERE id = $2", [c.id, u.id]);
+  return c.id;
+}
+
+app.get("/api/card", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT payment_method_id, card_brand, card_last4 FROM users WHERE id = $1", [req.user.id]);
+    const u = r.rows[0] || {};
+    res.json({ saved: !!u.payment_method_id, brand: u.card_brand || "", last4: u.card_last4 || "" });
+  } catch (err) {
+    console.error("card status:", err.message);
+    res.status(500).json({ error: "Could not check your card" });
+  }
+});
+
+app.post("/api/card/setup", auth, async (req, res) => {
+  try {
+    if (!stripe) return res.status(503).json({ error: "Payments are not configured yet." });
+    const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
+    const customer = await ensureCustomer(req.user.id);
+    const cs = await stripe.checkout.sessions.create({
+      mode: "setup",
+      customer,
+      success_url: `${base}/?card=1&cs={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${base}/?card=0`,
+    });
+    res.json({ url: cs.url });
+  } catch (err) {
+    console.error("card setup:", err.message);
+    res.status(502).json({ error: "Could not open the card form: " + err.message });
+  }
+});
+
+// Called when Stripe sends the driver back, to record which card was saved.
+app.post("/api/card/confirm", auth, async (req, res) => {
+  try {
+    if (!stripe) return res.status(503).json({ error: "Payments are not configured yet." });
+    const csId = String(req.body && req.body.cs || "");
+    if (!csId) return res.status(400).json({ error: "Missing session reference" });
+    const cs = await stripe.checkout.sessions.retrieve(csId);
+    if (!cs || !cs.setup_intent) return res.status(400).json({ error: "That card form was not completed." });
+    const si = await stripe.setupIntents.retrieve(String(cs.setup_intent));
+    const pmId = si && si.payment_method;
+    if (!pmId) return res.status(400).json({ error: "No card was saved." });
+    const pm = await stripe.paymentMethods.retrieve(String(pmId));
+    const card = pm.card || {};
+    await q("UPDATE users SET payment_method_id = $1, card_brand = $2, card_last4 = $3 WHERE id = $4",
+      [pm.id, card.brand || "card", card.last4 || "", req.user.id]);
+    res.json({ saved: true, brand: card.brand || "card", last4: card.last4 || "" });
+  } catch (err) {
+    console.error("card confirm:", err.message);
+    res.status(502).json({ error: "Could not save that card: " + err.message });
+  }
+});
+
+app.delete("/api/card", auth, async (req, res) => {
+  try {
+    const r = await q("SELECT payment_method_id FROM users WHERE id = $1", [req.user.id]);
+    const pm = r.rows[0] && r.rows[0].payment_method_id;
+    if (pm && stripe) { try { await stripe.paymentMethods.detach(pm); } catch (e) { console.error("detach:", e.message); } }
+    await q("UPDATE users SET payment_method_id = NULL, card_brand = NULL, card_last4 = NULL WHERE id = $1", [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("card remove:", err.message);
+    res.status(500).json({ error: "Could not remove that card" });
+  }
+});
+
 app.post("/api/park/:spotId", auth, async (req, res) => {
   try {
     const r = await q("SELECT * FROM spots WHERE id = $1", [req.params.spotId]);
     const spot = r.rows[0];
     if (!spot || !spot.open) return res.status(400).json({ error: "Spot is not available" });
+    if (spot.owner_id === req.user.id) return res.status(400).json({ error: "This is your own driveway" });
+    if (stripe) {
+      const c = await q("SELECT payment_method_id FROM users WHERE id = $1", [req.user.id]);
+      if (!c.rows[0] || !c.rows[0].payment_method_id) {
+        return res.status(402).json({ error: "Add a card before you park. You are only charged when the session ends.", code: "no_card" });
+      }
+    }
     const busy = await q("SELECT id FROM sessions WHERE spot_id = $1 AND ended_at IS NULL", [spot.id]);
     if (busy.rows.length) return res.status(409).json({ error: "Just taken — pick another spot" });
     const ins = await q(
       "INSERT INTO sessions (spot_id, driver_id) VALUES ($1,$2) RETURNING id",
       [spot.id, req.user.id]
     );
-    res.json({ session_id: ins.rows[0].id });
+    res.json({ session_id: ins.rows[0].id, arrival_note: spot.arrival_note || "" });
   } catch (err) {
     console.error("park:", err.message);
     res.status(500).json({ error: "Could not start session" });
@@ -692,9 +832,13 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
     await q("UPDATE sessions SET ended_at = now(), amount_cents = $1 WHERE id = $2", [amount, s.id]);
 
     if (stripe) {
+      const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
+      const charged = Math.max(amount, 50); // Stripe minimum charge is $0.50
       try {
-        const base = (process.env.BASE_URL && process.env.BASE_URL.trim().replace(/\/+$/, "")) || `https://${req.get("host")}`;
-        const charged = Math.max(amount, 50); // Stripe minimum charge is $0.50
+        const drv = await q("SELECT stripe_customer_id, payment_method_id FROM users WHERE id = $1", [req.user.id]);
+        const customer = drv.rows[0] && drv.rows[0].stripe_customer_id;
+        const pm = drv.rows[0] && drv.rows[0].payment_method_id;
+
         const hostR = await q("SELECT stripe_account_id FROM users WHERE id = $1", [spot.owner_id]);
         const hostAcct = hostR.rows[0] && hostR.rows[0].stripe_account_id;
         let splitReady = false;
@@ -704,6 +848,65 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
             splitReady = !!acct.charges_enabled;
           } catch (e) { splitReady = false; }
         }
+
+        // The normal path: the card was saved before the car pulled in, so the fare is
+        // taken without the driver having to do anything.
+        if (customer && pm) {
+          const params = {
+            amount: charged,
+            currency: process.env.CURRENCY || "usd",
+            customer,
+            payment_method: pm,
+            off_session: true,
+            confirm: true,
+            description: "Driveway parking",
+            metadata: { session_id: String(s.id), spot_id: String(spot.id) },
+          };
+          if (splitReady) {
+            params.application_fee_amount = Math.round(charged * COMMISSION);
+            params.transfer_data = { destination: hostAcct };
+          }
+          try {
+            const pi = await stripe.paymentIntents.create(params);
+            await q("UPDATE sessions SET payment_status = $1, payment_error = NULL WHERE id = $2",
+              [splitReady ? "paid_split" : "paid_no_split", s.id]);
+            return res.json({ amount_cents: amount, paid: true, pay_url: null, status: pi.status });
+          } catch (chargeErr) {
+            // A card can fail an hour after it was saved: expired, frozen, or the bank
+            // wants the cardholder present. We record the debt and hand back a payment
+            // page rather than pretending the booking was free.
+            console.error("off-session charge failed:", chargeErr.message);
+            await q("UPDATE sessions SET payment_status = 'charge_failed', payment_error = $1 WHERE id = $2",
+              [String(chargeErr.message).slice(0, 300), s.id]);
+            const recover = await stripe.checkout.sessions.create({
+              mode: "payment",
+              customer,
+              line_items: [{
+                price_data: {
+                  currency: process.env.CURRENCY || "usd",
+                  product_data: { name: "Driveway parking" },
+                  unit_amount: charged,
+                },
+                quantity: 1,
+              }],
+              ...(splitReady ? { payment_intent_data: {
+                application_fee_amount: Math.round(charged * COMMISSION),
+                transfer_data: { destination: hostAcct },
+              } } : {}),
+              success_url: `${base}/?paid=1`,
+              cancel_url: `${base}/?paid=0`,
+            });
+            return res.json({
+              amount_cents: amount,
+              paid: false,
+              pay_url: recover.url,
+              error: "Your saved card was declined. Please pay for this booking now.",
+            });
+          }
+        }
+
+        // No card on file. Older accounts can still reach this, so fall back to the
+        // payment page rather than letting the fare disappear.
         const params = {
           mode: "payment",
           line_items: [{
@@ -724,12 +927,14 @@ app.post("/api/end/:sessionId", auth, async (req, res) => {
           };
         }
         const checkout = await stripe.checkout.sessions.create(params);
-        await q("UPDATE sessions SET payment_status = $1 WHERE id = $2", [splitReady ? 'checkout_split' : 'checkout_no_split', s.id]);
-        return res.json({ amount_cents: amount, pay_url: checkout.url });
+        await q("UPDATE sessions SET payment_status = $1 WHERE id = $2",
+          [splitReady ? "checkout_split" : "checkout_no_split", s.id]);
+        return res.json({ amount_cents: amount, paid: false, pay_url: checkout.url });
       } catch (err) {
-        console.error("Stripe checkout failed:", err.message);
-        await q("UPDATE sessions SET payment_status = 'stripe_error' WHERE id = $1", [s.id]);
-        return res.status(502).json({ error: "Payment setup failed: " + err.message });
+        console.error("Stripe failed:", err.message);
+        await q("UPDATE sessions SET payment_status = 'stripe_error', payment_error = $1 WHERE id = $2",
+          [String(err.message).slice(0, 300), s.id]);
+        return res.status(502).json({ error: "Payment failed: " + err.message });
       }
     }
     await q("UPDATE sessions SET payment_status = 'simulated' WHERE id = $1", [s.id]);
