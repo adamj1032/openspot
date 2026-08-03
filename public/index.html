@@ -43,20 +43,19 @@
 
   /* ---------- landing ---------- */
   #landing { padding-bottom:44px; }
-  .hero { background:var(--chalk); color:var(--asphalt); min-height:74vh; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:64px 24px 70px; position:relative; overflow:hidden; text-align:center; border-bottom:2px solid var(--line); }
-  .hero::after { content:""; position:absolute; left:-10%; right:-10%; bottom:10px; height:6px;
-    background:repeating-linear-gradient(90deg, var(--paint) 0 34px, transparent 34px 58px); opacity:.85; border-radius:3px; }
-  .heroLogo { width:clamp(160px,20vw,250px); height:auto; margin:0 auto 14px; display:block; }
-  .tagline { margin-top:14px; font-size:clamp(12px,1.2vw,16px); font-weight:800; letter-spacing:5px; color:var(--paint); }
-  .tagline i { font-style:normal; color:var(--asphalt); }
+  
+  
+  
+  
+  
   .word { font-family:'Fredoka',sans-serif; font-weight:700; font-size:46px; letter-spacing:-.5px; line-height:.95; }
   .word em { font-style:normal; color:var(--paint); }
-  .pitch { margin:14px auto 0; font-size:16px; color:#5B6274; max-width:38ch; line-height:1.55; }
-  .pitch b { color:var(--asphalt); }
-  .meterStrip { display:flex; gap:14px; padding:0 18px; max-width:780px; margin:-46px auto 0; position:relative; z-index:2; width:100%; }
-  .meter { flex:1; background:var(--asphalt); color:#FFD9D9; border-radius:16px; padding:18px 10px 14px; text-align:center; border-bottom:5px solid var(--paint); box-shadow:0 12px 26px rgba(32,43,71,.22); }
-  .meter b { font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:clamp(26px,3vw,36px); display:block; letter-spacing:1px; color:#fff; }
-  .meter span { font-size:10.5px; color:#AEB6C8; text-transform:uppercase; letter-spacing:.8px; }
+  
+  
+  
+  
+  
+  
 
   /* hang-tag auth card */
   .tagWrap { display:flex; justify-content:center; padding:64px 16px 30px; }
@@ -75,19 +74,18 @@
   .agree a { color:var(--asphalt); font-weight:700; }
   .hint { font-size:12px; color:var(--mut); margin-top:12px; text-align:center; }
 
-  section.lanes { padding:70px 28px 0; max-width:1000px; margin:0 auto; }
-  section.lanes h2 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:clamp(26px,3.4vw,38px); margin-bottom:26px; text-align:center; }
-  .laneGrid { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:64px; }
-  .laneGrid::before { content:""; position:absolute; top:0; bottom:0; left:50%; width:4px; transform:translateX(-50%);
-    background:repeating-linear-gradient(180deg, var(--paint) 0 22px, transparent 22px 40px); opacity:.7; }
-  .laneCol h3 { font-size:15px; text-transform:uppercase; letter-spacing:1px; color:var(--mut); margin-bottom:14px; }
-  .step { margin-bottom:16px; font-size:16px; line-height:1.6; color:#4B5468; }
-  .step b { color:var(--asphalt); }
+  
+  
+  
+  
+  
+  
+  
 
   /* municipal sign */
-  .sign { margin:70px auto 0; max-width:760px; width:calc(100% - 40px); background:var(--chalk); border:3px solid var(--asphalt); border-radius:14px; padding:0 0 16px; box-shadow:0 10px 24px rgba(32,43,71,.12); }
-  .sign .signTop { background:var(--paint); color:#fff; font-family:'Fredoka',sans-serif; font-weight:700; letter-spacing:1px; font-size:14px; text-align:center; padding:10px 0; border-radius:7px 7px 0 0; }
-  .sign p { font-size:15px; color:#4B5468; line-height:1.6; padding:14px 20px 0; }
+  
+  
+  
   .b { display:inline-block; font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:4px; letter-spacing:.3px; }
   .bA { background:#E2F3E9; color:var(--free); border:1.5px solid var(--free); }
   .bH { background:#FDE7E7; color:#B23A3C; border:1.5px solid var(--paint); }
@@ -104,24 +102,23 @@
   .navLinks a:hover { color:var(--paint); }
   .navCta { flex:none; padding:9px 16px; font-size:13px; border-radius:9px; }
   @media (max-width:430px){ .navLinks a { display:none; } }
-  @media (max-width:720px){ .laneGrid { grid-template-columns:1fr; gap:34px; } .laneGrid::before { display:none; } .meterStrip { margin-top:-30px; } }
 
-  .heroH { font-family:'Fredoka',sans-serif; font-weight:700; font-size:clamp(38px, 6vw, 74px); line-height:1.06; margin-top:8px; }
-  .heroH em { font-style:normal; color:var(--paint); }
-  .heroBtns { display:flex; gap:14px; justify-content:center; margin-top:30px; flex-wrap:wrap; }
-  .heroBtns .btn { flex:none; padding:16px 30px; font-size:17px; border-radius:14px; }
+  
+  
+  
+  
 
   /* pages */
-  .page { min-height:62vh; }
+  .page { min-height:auto; }
   .navLinks a { cursor:pointer; }
   .navLinks a.on { color:var(--paint); }
   .pageCta { text-align:center; padding:26px 0 8px; }
   .pageCta .btn { flex:none; padding:13px 26px; }
 
   /* host ticket */
-  .calc { padding:70px 24px 0; text-align:center; }
-  .calc h2 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:clamp(26px,3.4vw,38px); }
-  .calcSub { font-size:16px; color:#5B6274; margin:10px auto 24px; max-width:40ch; line-height:1.55; }
+  
+  
+  
   .ticket { background:var(--chalk); border:3px solid var(--asphalt); border-radius:20px; max-width:440px; margin:0 auto; overflow:hidden; box-shadow:0 14px 30px rgba(32,43,71,.14); }
   .ticketTop { background:var(--asphalt); color:#fff; font-size:11px; font-weight:800; letter-spacing:2px; padding:9px 0; }
   .stepper { display:flex; align-items:center; justify-content:center; gap:18px; padding:18px 0 6px; }
@@ -148,10 +145,84 @@
   .siteFoot .tiny { font-size:11px; color:#8892A8; margin-top:10px; }
 
   /* brand weaving */
-  .heroBg { position:absolute; right:-6%; bottom:-10%; width:min(52vw,560px); opacity:.05; transform:rotate(-8deg); pointer-events:none; user-select:none; }
-  .secMark { display:block; width:44px; height:44px; object-fit:contain; margin:0 auto 10px; }
+  
+  
   .ticketTop img { width:18px; height:18px; object-fit:contain; vertical-align:-4px; margin-right:6px; filter:brightness(0) invert(1); }
   .emptyRoo { display:block; width:70px; margin:18px auto 6px; opacity:.4; }
+
+
+  /* ===== landing layout ===== */
+  .navBrand { cursor:pointer; }
+  .hero { display:grid; grid-template-columns:1.05fr .95fr; align-items:center; gap:40px;
+    min-height:calc(100vh - 74px); padding:60px clamp(24px,6vw,90px); background:var(--chalk); border-bottom:1px solid var(--line); }
+  .heroCopy { max-width:640px; }
+  .heroH { font-family:'Fredoka',sans-serif; font-weight:700; font-size:clamp(40px,5.2vw,74px); line-height:1.02; letter-spacing:-1px; }
+  .heroH em { font-style:normal; color:var(--paint); }
+  .heroSub { margin-top:22px; font-size:clamp(16px,1.35vw,20px); line-height:1.6; color:#5B6274; max-width:46ch; }
+  .heroBtns { display:flex; gap:14px; margin-top:34px; flex-wrap:wrap; }
+  .heroBtns .btn { flex:none; padding:17px 32px; font-size:17px; border-radius:14px; }
+  .heroNote { margin-top:22px; font-size:13.5px; color:#8892A8; font-weight:700; letter-spacing:.3px; }
+  .heroNote span { color:var(--paint); font-family:'IBM Plex Mono',monospace; }
+  .heroArt { display:flex; justify-content:center; }
+  .heroArt img { width:min(100%,520px); height:auto; }
+  @media (max-width:860px){
+    .hero { grid-template-columns:1fr; text-align:center; min-height:auto; padding:44px 24px 54px; }
+    .heroCopy { margin:0 auto; } .heroSub { margin-left:auto; margin-right:auto; } .heroBtns { justify-content:center; }
+    .heroArt { order:-1; } .heroArt img { width:min(78%,320px); }
+  }
+
+  .band { background:var(--asphalt); padding:clamp(44px,6vw,80px) clamp(24px,6vw,90px); }
+  .bandInner { display:grid; grid-template-columns:repeat(3,1fr); gap:clamp(20px,3vw,44px); max-width:1240px; margin:0 auto; }
+  .bCard h4 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:20px; color:#fff; margin-bottom:8px; }
+  .bCard p { font-size:15px; line-height:1.6; color:#AEB6C8; }
+  @media (max-width:760px){ .bandInner { grid-template-columns:1fr; gap:26px; } }
+
+  .pageHead { text-align:center; padding:clamp(50px,7vw,90px) 24px 0; }
+  .pageHead h2 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:clamp(30px,4vw,52px); letter-spacing:-.5px; }
+  .pageHead p { margin-top:10px; font-size:17px; color:#7C8494; }
+
+  .splitWrap { padding:44px clamp(24px,6vw,90px) 0; }
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:clamp(24px,4vw,60px); max-width:1240px; margin:0 auto; }
+  .colTag { display:inline-block; font-size:12px; font-weight:800; letter-spacing:1.6px; text-transform:uppercase;
+    color:#fff; background:var(--asphalt); padding:7px 14px; border-radius:999px; margin-bottom:18px; }
+  .colTag.alt { background:var(--paint); }
+  .stepCard { background:var(--chalk); border:1px solid var(--line); border-radius:16px; padding:20px 22px; margin-bottom:14px;
+    box-shadow:0 3px 14px rgba(32,43,71,.05); }
+  .stepCard b { display:block; font-size:17px; margin-bottom:5px; }
+  .stepCard span { font-size:15px; line-height:1.6; color:#5B6274; }
+  @media (max-width:760px){ .split { grid-template-columns:1fr; } }
+
+  .hostWrap { display:grid; grid-template-columns:minmax(320px,430px) 1fr; gap:clamp(28px,5vw,70px);
+    align-items:center; max-width:1180px; margin:0 auto; padding:44px clamp(24px,6vw,90px) 0; }
+  .hostSide h3 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:24px; margin-bottom:12px; }
+  .hostSide p { font-size:16px; line-height:1.65; color:#5B6274; margin-bottom:12px; max-width:48ch; }
+  .hostSide .btn { flex:none; padding:15px 30px; }
+  @media (max-width:860px){ .hostWrap { grid-template-columns:1fr; } }
+
+  .trustWrap { display:grid; grid-template-columns:1fr 1fr; gap:clamp(20px,3vw,36px);
+    max-width:1080px; margin:0 auto; padding:44px clamp(24px,6vw,90px) 0; }
+  .tCard { background:var(--chalk); border:1px solid var(--line); border-radius:18px; padding:26px 26px 28px; box-shadow:0 3px 14px rgba(32,43,71,.05); }
+  .tCard .b { margin-bottom:12px; font-size:12px; padding:5px 12px; border-radius:999px; }
+  .tCard p { font-size:15.5px; line-height:1.65; color:#5B6274; }
+  .tCard.wide { grid-column:1/-1; background:transparent; border:none; box-shadow:none; padding:4px 0 0; text-align:center; }
+  .fineNote { font-size:14px; color:#8892A8; }
+  @media (max-width:760px){ .trustWrap { grid-template-columns:1fr; } }
+
+  .ticket { background:var(--chalk); border:2px solid var(--asphalt); border-radius:20px; overflow:hidden; box-shadow:0 16px 40px rgba(32,43,71,.14); }
+  .ticketTop { background:var(--asphalt); color:#fff; font-size:11px; font-weight:800; letter-spacing:2px; padding:11px 0; text-align:center; }
+  .ticketTop img { width:20px; height:20px; object-fit:contain; vertical-align:-5px; margin-right:8px; }
+
+  /* brand fills */
+  .hero { position:relative; overflow:hidden; }
+  .heroBg { position:absolute; left:-8%; bottom:-14%; width:min(46vw,520px); opacity:.045; transform:rotate(8deg) scaleX(-1); pointer-events:none; }
+  .statPills { display:flex; gap:14px; margin-top:30px; flex-wrap:wrap; }
+  .pill { background:var(--asphalt); color:#fff; border-radius:999px; padding:12px 22px; display:flex; align-items:baseline; gap:9px; box-shadow:0 6px 18px rgba(32,43,71,.16); }
+  .pill b { font-size:22px; color:var(--paint); }
+  .pill span { font-size:12.5px; letter-spacing:.6px; color:#AEB6C8; text-transform:uppercase; font-weight:800; }
+  .band { position:relative; overflow:hidden; }
+  .bandRoo { position:absolute; right:-4%; top:50%; transform:translateY(-50%) rotate(-6deg); width:min(30vw,340px); opacity:.07; pointer-events:none; }
+  .secMark { display:block; width:52px; height:52px; object-fit:contain; margin:0 auto 14px; }
+  @media (max-width:860px){ .statPills { justify-content:center; } .heroBg { display:none; } }
 
   /* ---------- app ---------- */
   #mainView { display:none; flex:1; min-height:0; flex-direction:column; background:var(--concrete); }
@@ -211,7 +282,7 @@
   <div id="landing">
 
     <nav class="nav">
-      <div class="navBrand" onclick="go('home')" style="cursor:pointer;">
+      <div class="navBrand" onclick="go('home')">
         <img src="/brand-logo.png" alt="Parkeroo" onerror="this.style.display='none'" />
         <span class="word nv">parke<em>roo</em></span>
       </div>
@@ -227,50 +298,76 @@
     <div class="page" data-page="home">
       <div class="hero">
         <img class="heroBg" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
-        <img class="heroLogo" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
-        <h1 class="heroH">A local's driveway,<br/><em>open right now</em></h1>
-        <div class="tagline"><i>FIND IT.</i> <i>PARK IT.</i> GO.</div>
-        <div class="heroBtns">
-          <button class="btn btn-paint" onclick="go('start')">Find parking</button>
-          <button class="btn btn-tar" onclick="setMode('up');go('start')">List my driveway</button>
+        <div class="heroCopy">
+          <h1 class="heroH">A local's driveway,<br/><em>open right now</em></h1>
+          <p class="heroSub">Pull up to an unfamiliar street and find a driveway that someone who lives there has opened for parking. Pay by the minute, leave when you like.</p>
+          <div class="heroBtns">
+            <button class="btn btn-paint" onclick="go('start')">Find parking</button>
+            <button class="btn btn-tar" onclick="setMode('up');go('start')">List my driveway</button>
+          </div>
+          <div class="statPills">
+            <div class="pill"><b class="mono" id="stFree">--</b><span>open right now</span></div>
+            <div class="pill"><b class="mono">80%</b><span>kept by hosts</span></div>
+          </div>
+        </div>
+        <div class="heroArt">
+          <img src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
         </div>
       </div>
-      <div class="meterStrip">
-        <div class="meter"><b id="stTotal">--</b><span>driveways listed</span></div>
-        <div class="meter"><b id="stFree">--</b><span>free right now</span></div>
-        <div class="meter"><b>80%</b><span>of fare to host</span></div>
+
+      <div class="band">
+        <img class="bandRoo" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
+        <div class="bandInner">
+          <div class="bCard">
+            <h4>No reservation</h4>
+            <p>Spots are claimed the moment you arrive, not booked days ahead.</p>
+          </div>
+          <div class="bCard">
+            <h4>Billed by the minute</h4>
+            <p>A meter runs while you are parked. Fifteen minute minimum, nothing more.</p>
+          </div>
+          <div class="bCard">
+            <h4>Real people, checked</h4>
+            <p>Addresses are matched to their pins and hosts verify their identity with Stripe.</p>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- ---- HOW ---- -->
     <div class="page" data-page="how" style="display:none;">
-      <section class="lanes">
+      <div class="pageHead">
         <img class="secMark" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
         <h2>How it works</h2>
-        <div class="laneGrid">
-          <div class="laneCol">
-            <h3>Driving</h3>
-            <div class="step"><b>Open the live map.</b> Coral pins are driveways free at this moment, priced per hour.</div>
-            <div class="step"><b>Tap Park now.</b> No reservation. A meter starts when you pull in.</div>
-            <div class="step"><b>End and pay.</b> Billed by the minute through Stripe, 15 minute minimum. Rate the spot after.</div>
+        <p>Two sides of the same street.</p>
+      </div>
+      <div class="splitWrap">
+        <div class="split">
+          <div class="col">
+            <div class="colTag">Driving</div>
+            <div class="stepCard"><b>Open the live map.</b><span>Coral pins are driveways free at this moment, priced per hour.</span></div>
+            <div class="stepCard"><b>Tap Park now.</b><span>No reservation. A meter starts when you pull in.</span></div>
+            <div class="stepCard"><b>End and pay.</b><span>Billed by the minute through Stripe, fifteen minute minimum. Rate the spot after.</span></div>
           </div>
-          <div class="laneCol">
-            <h3>Hosting</h3>
-            <div class="step"><b>Pin your driveway.</b> Add its street address and your hourly price.</div>
-            <div class="step"><b>Verify once with Stripe.</b> Identity and bank, so you can be paid.</div>
-            <div class="step"><b>Earn on autopilot.</b> You keep 80 percent of every fare, split automatically.</div>
+          <div class="col">
+            <div class="colTag alt">Hosting</div>
+            <div class="stepCard"><b>Pin your driveway.</b><span>Add its street address and the hourly price you want.</span></div>
+            <div class="stepCard"><b>Verify once with Stripe.</b><span>Identity and bank details, so payouts can reach you.</span></div>
+            <div class="stepCard"><b>Earn on autopilot.</b><span>You keep 80 percent of every fare, split automatically at checkout.</span></div>
           </div>
         </div>
-        <div class="pageCta"><button class="btn btn-paint" onclick="go('start')">Get started</button></div>
-      </section>
+      </div>
+      <div class="pageCta"><button class="btn btn-paint" onclick="go('start')">Get started</button></div>
     </div>
 
     <!-- ---- HOSTING ---- -->
     <div class="page" data-page="host" style="display:none;">
-      <section class="calc">
+      <div class="pageHead">
         <img class="secMark" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
         <h2>Your driveway, on the meter</h2>
-        <p class="calcSub">Pick a price and see what stays in your pocket.</p>
+        <p>Set a price and see what stays in your pocket.</p>
+      </div>
+      <div class="hostWrap">
         <div class="ticket">
           <div class="ticketTop"><img src="/brand-logo.png" alt="" onerror="this.style.display='none'" />PARKEROO · HOST TICKET</div>
           <div class="stepper">
@@ -279,9 +376,9 @@
             <button class="stepBtn" onclick="bump(1)">+</button>
           </div>
           <div class="chipRow">
-            <button class="chip on" data-sc="0" onclick="scene(0)">Game days</button>
-            <button class="chip" data-sc="1" onclick="scene(1)">Commuter weekdays</button>
-            <button class="chip" data-sc="2" onclick="scene(2)">Every day</button>
+            <button class="chip on" onclick="scene(0)">Game days</button>
+            <button class="chip" onclick="scene(1)">Commuter weekdays</button>
+            <button class="chip" onclick="scene(2)">Every day</button>
           </div>
           <div class="tearline"></div>
           <div class="ticketRows">
@@ -289,23 +386,46 @@
             <div class="tRow small"><span>after Parkeroo's 20 percent</span><span class="mono">kept by you</span></div>
           </div>
         </div>
-        <div class="pageCta"><button class="btn btn-paint" onclick="setMode('up');go('start')">Become a host</button></div>
-      </section>
+        <div class="hostSide">
+          <h3>What hosting involves</h3>
+          <p>Your driveway sits empty for most of the week. Listing it takes about a minute: drop a pin, add the address, name your price.</p>
+          <p>You control when it is open. Close the listing before guests arrive, open it again when you leave for work.</p>
+          <p>Stripe handles the money. Each fare is split at checkout and your share lands in your bank on Stripe's payout schedule.</p>
+          <button class="btn btn-paint" style="margin-top:6px;" onclick="setMode('up');go('start')">Become a host</button>
+        </div>
+      </div>
     </div>
 
     <!-- ---- TRUST ---- -->
     <div class="page" data-page="trust" style="display:none;">
-      <div class="sign" style="margin-top:34px;">
-        <div class="signTop">Posted: listing rules</div>
-        <p>Every listing carries its street address, and we check the address sits where the pin was dropped. Passing listings show <span class="b bA">Address confirmed</span></p>
-        <p>Hosts who complete Stripe payout verification show <span class="b bH">Verified host</span></p>
-        <p>These checks tie every payout to a real, verified person. They are not proof of ownership. Report a listing that looks wrong and it comes down while we investigate.</p>
+      <div class="pageHead">
+        <img class="secMark" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
+        <h2>Who you are parking with</h2>
+        <p>Two checks run on every listing.</p>
+      </div>
+      <div class="trustWrap">
+        <div class="tCard">
+          <div class="b bA">Address confirmed</div>
+          <p>Every listing carries a street address, and we check that the address sits where the host dropped the pin. Listings that fail the check still appear, marked unconfirmed, so you can decide for yourself.</p>
+        </div>
+        <div class="tCard">
+          <div class="b bH">Verified host</div>
+          <p>Hosts who complete Stripe payout verification have had their legal identity and bank account confirmed by Stripe. Every payout traces back to a real person.</p>
+        </div>
+        <div class="tCard wide">
+          <p class="fineNote">Neither check proves who owns a property. If a listing looks wrong to you, report it and we will take it down while we investigate.</p>
+        </div>
       </div>
       <div class="pageCta"><button class="btn btn-paint" onclick="go('start')">Get started</button></div>
     </div>
 
     <!-- ---- SIGN IN ---- -->
     <div class="page" data-page="start" style="display:none;">
+      <div class="pageHead">
+        <img class="secMark" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
+        <h2>Get on the map</h2>
+        <p>One account works for parking and for hosting.</p>
+      </div>
       <div class="tagWrap">
         <div class="tag">
           <div class="tabs">
@@ -429,11 +549,12 @@ ticket();
 (async function landingStats(){
   try{
     const spots = await api("/spots");
-    document.getElementById("stTotal").textContent = String(spots.length).padStart(2,"0");
-    document.getElementById("stFree").textContent = String(spots.filter(s=>s.open && !s.taken_by).length).padStart(2,"0");
+    const free = spots.filter(s=>s.open && !s.taken_by).length;
+    const el = document.getElementById("stFree");
+    if(el) el.textContent = String(free).padStart(2,"0");
   }catch(e){
-    document.getElementById("stTotal").textContent = "00";
-    document.getElementById("stFree").textContent = "00";
+    const el = document.getElementById("stFree");
+    if(el) el.textContent = "00";
   }
 })();
 
