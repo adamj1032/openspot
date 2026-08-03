@@ -247,7 +247,7 @@ app.get("/api/spots", async (req, res) => {
 
 app.post("/api/spots", auth, async (req, res) => {
   try {
-    const { price_cents, note, address, photo, device_lat, device_lng } = req.body || {};
+    const { price_cents, note, address, photo, device_lat, device_lng, device_accuracy } = req.body || {};
     if (!address || address.trim().length < 6) {
       return res.status(400).json({ error: "Enter the street address of your driveway" });
     }
@@ -267,17 +267,51 @@ app.post("/api/spots", auth, async (req, res) => {
     }
 
     // Presence check: the host's device must actually be at the driveway when listing it.
-    let gpsOk = false, gpsMeters = null;
+    //
+    // The radius here is the whole point of the check. Too wide and a host can list any
+    // house on their street; a 200m radius covers roughly twenty neighbouring driveways.
+    // We use a tight base radius and widen it only by however uncertain the phone says
+    // its own fix is, capped, so genuine GPS drift is tolerated but slack is not handed out.
+    const PRESENCE_BASE_M = 60;
+    const PRESENCE_MAX_M = 120;
+    const ACCURACY_LIMIT_M = 100;
+
     const dLat = Number(device_lat), dLng = Number(device_lng);
-    if (isFinite(dLat) && isFinite(dLng)) {
-      gpsMeters = metersBetween(dLat, dLng, hit.lat, hit.lng);
-      gpsOk = gpsMeters <= 200;
-    }
-    if (!gpsOk) {
+    const acc = Number(device_accuracy);
+
+    if (!isFinite(dLat) || !isFinite(dLng)) {
       return res.status(403).json({
-        error: gpsMeters === null
-          ? "We need your location to confirm you're at this driveway. Allow location access and try again from the driveway itself."
-          : `You appear to be about ${gpsMeters > 1609 ? Math.round(gpsMeters/1609) + " miles" : Math.round(gpsMeters) + " metres"} from that address. Driveways can only be listed while you are standing at them.`,
+        error: "We need your location to confirm you're at this driveway. Allow location access and try again from the driveway itself.",
+        code: "not_present",
+      });
+    }
+
+    // A pin that only resolved to a street or a town centre cannot be checked against.
+    // Distance to a town centroid tells us nothing about which driveway you are standing in.
+    if (!hit.precise) {
+      return res.status(422).json({
+        error: "We could only place that address approximately, so we cannot confirm you are at the driveway. Check the house number and spelling, then try again.",
+        code: "not_precise",
+      });
+    }
+
+    // A coarse fix (wifi or mast positioning rather than GPS) is not evidence of presence.
+    if (!isFinite(acc) || acc > ACCURACY_LIMIT_M) {
+      return res.status(403).json({
+        error: "Your phone is only giving an approximate position right now. Turn on precise location for this site, step outside, and try again.",
+        code: "low_accuracy",
+      });
+    }
+
+    const allowed = Math.min(PRESENCE_MAX_M, PRESENCE_BASE_M + Math.max(0, acc));
+    const gpsMeters = metersBetween(dLat, dLng, hit.lat, hit.lng);
+
+    if (gpsMeters > allowed) {
+      const away = gpsMeters > 1609
+        ? Math.round(gpsMeters / 1609) + " miles"
+        : Math.round(gpsMeters) + " metres";
+      return res.status(403).json({
+        error: `You appear to be about ${away} from that address. A driveway can only be listed while you are standing in it, not from nearby.`,
         code: "not_present",
       });
     }
