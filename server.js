@@ -54,6 +54,16 @@ async function initDb() {
       payment_status TEXT DEFAULT 'pending'
     );`);
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_account_id TEXT;`);
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS accepted_terms_at TIMESTAMPTZ;`);
+  await q(`
+    CREATE TABLE IF NOT EXISTS ratings (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER UNIQUE NOT NULL REFERENCES sessions(id),
+      spot_id INTEGER NOT NULL REFERENCES spots(id),
+      driver_id INTEGER NOT NULL REFERENCES users(id),
+      stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+      created_at TIMESTAMPTZ DEFAULT now()
+    );`);
   console.log("Database ready");
 }
 
@@ -75,11 +85,12 @@ function auth(req, res, next) {
 // ---- accounts ----
 app.post("/api/signup", async (req, res) => {
   try {
-    const { email, name, password } = req.body || {};
+    const { email, name, password, accepted } = req.body || {};
     if (!email || !name || !password) return res.status(400).json({ error: "Email, name and password are required" });
+    if (!accepted) return res.status(400).json({ error: "You must agree to the Terms of Service and Privacy Policy" });
     const hash = bcrypt.hashSync(password, 10);
     const r = await q(
-      "INSERT INTO users (email, name, pass_hash) VALUES ($1,$2,$3) RETURNING id",
+      "INSERT INTO users (email, name, pass_hash, accepted_terms_at) VALUES ($1,$2,$3, now()) RETURNING id",
       [email.toLowerCase(), name, hash]
     );
     const token = jwt.sign({ id: r.rows[0].id, name }, JWT_SECRET, { expiresIn: "30d" });
@@ -112,7 +123,9 @@ app.get("/api/spots", async (req, res) => {
   try {
     const r = await q(`
       SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, u.name AS host,
-        (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by
+        (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
+        (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
+        (SELECT COUNT(*)::int FROM ratings WHERE spot_id = s.id) AS rating_count
       FROM spots s JOIN users u ON u.id = s.owner_id
     `);
     res.json(r.rows);
@@ -163,6 +176,63 @@ app.delete("/api/spots/:id", auth, async (req, res) => {
   } catch (err) {
     console.error("delete spot:", err.message);
     res.status(500).json({ error: "Could not remove listing" });
+  }
+});
+
+// ---- ratings & history ----
+app.post("/api/rate/:sessionId", auth, async (req, res) => {
+  try {
+    const stars = parseInt(req.body && req.body.stars);
+    if (!stars || stars < 1 || stars > 5) return res.status(400).json({ error: "Rating must be 1 to 5 stars" });
+    const r = await q(
+      "SELECT * FROM sessions WHERE id = $1 AND driver_id = $2 AND ended_at IS NOT NULL",
+      [req.params.sessionId, req.user.id]
+    );
+    const s = r.rows[0];
+    if (!s) return res.status(404).json({ error: "No finished session to rate" });
+    await q(
+      `INSERT INTO ratings (session_id, spot_id, driver_id, stars) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (session_id) DO UPDATE SET stars = $4`,
+      [s.id, s.spot_id, req.user.id, stars]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("rate:", err.message);
+    res.status(500).json({ error: "Could not save rating" });
+  }
+});
+
+app.get("/api/history", auth, async (req, res) => {
+  try {
+    const r = await q(`
+      SELECT se.id, se.started_at, se.ended_at, se.amount_cents, u.name AS host, sp.note,
+        (SELECT stars FROM ratings WHERE session_id = se.id) AS my_stars
+      FROM sessions se JOIN spots sp ON sp.id = se.spot_id JOIN users u ON u.id = sp.owner_id
+      WHERE se.driver_id = $1 AND se.ended_at IS NOT NULL
+      ORDER BY se.ended_at DESC LIMIT 50
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch (err) {
+    console.error("history:", err.message);
+    res.status(500).json({ error: "Could not load history" });
+  }
+});
+
+app.get("/api/earnings", auth, async (req, res) => {
+  try {
+    const r = await q(`
+      SELECT se.id, se.ended_at, se.amount_cents, du.name AS driver
+      FROM sessions se
+      JOIN spots sp ON sp.id = se.spot_id
+      JOIN users du ON du.id = se.driver_id
+      WHERE sp.owner_id = $1 AND se.ended_at IS NOT NULL AND se.amount_cents IS NOT NULL
+      ORDER BY se.ended_at DESC LIMIT 50
+    `, [req.user.id]);
+    const total = r.rows.reduce((a, x) => a + (x.amount_cents || 0), 0);
+    res.json({ sessions: r.rows, total_cents: total, host_share_cents: Math.round(total * 0.8) });
+  } catch (err) {
+    console.error("earnings:", err.message);
+    res.status(500).json({ error: "Could not load earnings" });
   }
 });
 
