@@ -706,8 +706,13 @@ let token=null, myName="", map, layer, sess=null, sessStart=null, myId=null, mod
 let appView="drive", pickedAddr=null, pickedPhoto=null;
 
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.style.display="block"; setTimeout(()=>t.style.display="none",4000); }
+// Inside the native app the page is served from capacitor://localhost, so a relative
+// path has no server behind it. On the web this stays empty and nothing changes.
+const API_BASE = (location.protocol === "http:" || location.protocol === "https:")
+  ? "" : "https://parkeroo.app";
+
 async function api(path, method="GET", body){
-  const r = await fetch("/api"+path, {
+  const r = await fetch(API_BASE+"/api"+path, {
     method, headers:{ "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) },
     body: body?JSON.stringify(body):undefined
   });
