@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Parkeroo — park in a neighbor's driveway</title>
+<title>Parkeroo — park in a local's driveway</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="icon" type="image/png" href="/brand-logo.png" />
@@ -46,7 +46,7 @@
   .hero { background:var(--chalk); color:var(--asphalt); padding:42px 22px 34px; position:relative; overflow:hidden; text-align:center; border-bottom:2px solid var(--line); }
   .hero::after { content:""; position:absolute; left:-10%; right:-10%; bottom:10px; height:6px;
     background:repeating-linear-gradient(90deg, var(--paint) 0 34px, transparent 34px 58px); opacity:.85; border-radius:3px; }
-  .heroLogo { width:150px; height:auto; margin:0 auto 10px; display:block; }
+  .heroLogo { width:170px; height:auto; margin:0 auto 10px; display:block; }
   .tagline { margin-top:10px; font-size:12px; font-weight:800; letter-spacing:4px; color:var(--paint); }
   .tagline i { font-style:normal; color:var(--asphalt); }
   .word { font-family:'Fredoka',sans-serif; font-weight:700; font-size:46px; letter-spacing:-.5px; line-height:.95; }
@@ -93,6 +93,57 @@
   .bH { background:#FDE7E7; color:#B23A3C; border:1.5px solid var(--paint); }
   .foot { text-align:center; font-size:11.5px; color:var(--mut); padding:30px 0 12px; }
   .foot a { color:var(--mut); }
+
+  /* nav */
+  .nav { position:sticky; top:0; z-index:900; background:rgba(250,247,241,.92); backdrop-filter:blur(8px); display:flex; justify-content:space-between; align-items:center; padding:12px 18px; border-bottom:2px solid var(--line); }
+  .navBrand { display:flex; align-items:center; gap:9px; }
+  .navBrand img { width:34px; height:34px; object-fit:contain; }
+  .word.nv { font-size:22px; }
+  .navLinks { display:flex; align-items:center; gap:16px; }
+  .navLinks a { font-size:13px; font-weight:800; color:var(--asphalt); text-decoration:none; }
+  .navLinks a:hover { color:var(--paint); }
+  .navCta { flex:none; padding:9px 16px; font-size:13px; border-radius:9px; }
+  @media (max-width:430px){ .navLinks a { display:none; } }
+
+  .heroH { font-family:'Fredoka',sans-serif; font-weight:700; font-size:34px; line-height:1.08; margin-top:6px; }
+  .heroH em { font-style:normal; color:var(--paint); }
+  .heroBtns { display:flex; gap:10px; justify-content:center; margin-top:20px; flex-wrap:wrap; }
+  .heroBtns .btn { flex:none; padding:13px 20px; }
+
+  /* pages */
+  .page { min-height:40vh; }
+  .navLinks a { cursor:pointer; }
+  .navLinks a.on { color:var(--paint); }
+  .pageCta { text-align:center; padding:26px 0 8px; }
+  .pageCta .btn { flex:none; padding:13px 26px; }
+
+  /* host ticket */
+  .calc { padding:34px 20px 0; text-align:center; }
+  .calc h2 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:22px; }
+  .calcSub { font-size:13.5px; color:#5B6274; margin:8px auto 16px; max-width:36ch; line-height:1.5; }
+  .ticket { background:var(--chalk); border:3px solid var(--asphalt); border-radius:18px; max-width:380px; margin:0 auto; overflow:hidden; box-shadow:0 10px 24px rgba(32,43,71,.12); }
+  .ticketTop { background:var(--asphalt); color:#fff; font-size:11px; font-weight:800; letter-spacing:2px; padding:9px 0; }
+  .stepper { display:flex; align-items:center; justify-content:center; gap:18px; padding:18px 0 6px; }
+  .stepBtn { width:44px; height:44px; border-radius:12px; background:var(--paint); color:#fff; font-size:24px; font-weight:800; box-shadow:0 3px 0 #C4393B; }
+  .stepBtn:active { transform:translateY(2px); box-shadow:0 1px 0 #C4393B; }
+  .stepVal b { font-size:34px; display:block; }
+  .stepVal span { font-size:11px; color:#7C8494; letter-spacing:.5px; }
+  .chipRow { display:flex; gap:8px; justify-content:center; padding:12px 14px 14px; flex-wrap:wrap; }
+  .chip { padding:8px 12px; border-radius:999px; font-size:12px; font-weight:800; background:#F3EFE7; color:#5B6274; border:2px solid var(--line); }
+  .chip.on { background:var(--asphalt); color:#fff; border-color:var(--asphalt); }
+  .tearline { border-top:3px dashed var(--line); margin:0 12px; }
+  .ticketRows { padding:12px 18px 18px; text-align:left; }
+  .tRow { display:flex; justify-content:space-between; align-items:baseline; font-size:13px; color:#4B5468; }
+  .tRow b { font-size:28px; color:var(--paint); }
+  .tRow.small { font-size:11px; color:#8892A8; margin-top:2px; }
+
+  .siteFoot { margin-top:40px; background:var(--asphalt); color:#C9D0E0; text-align:center; padding:30px 20px 26px; }
+  .footBrand { display:flex; justify-content:center; align-items:center; gap:9px; margin-bottom:10px; }
+  .footBrand img { width:34px; height:34px; object-fit:contain; background:#fff; border-radius:9px; padding:2px; }
+  .siteFoot .word.nv { color:#fff; }
+  .siteFoot p { font-size:12.5px; line-height:1.6; margin-bottom:6px; }
+  .siteFoot a { color:#fff; font-weight:700; }
+  .siteFoot .tiny { font-size:11px; color:#8892A8; margin-top:10px; }
 
   /* ---------- app ---------- */
   #mainView { display:none; flex:1; min-height:0; flex-direction:column; background:var(--concrete); }
@@ -150,68 +201,132 @@
 
   <!-- ================= LANDING ================= -->
   <div id="landing">
-    <div class="hero">
-      <img class="heroLogo" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
-      <div class="word">parke<em>roo</em></div>
-      <div class="tagline"><i>FIND IT.</i> <i>PARK IT.</i> GO.</div>
-      <div class="pitch"><b>A live map of driveways that neighbors have opened up for parking.</b> Find one that is free right now, park in it, and pay by the minute. If you have a driveway of your own, you can list it and earn from the hours it usually sits empty.</div>
-    </div>
 
-    <div class="meterStrip">
-      <div class="meter"><b id="stTotal">--</b><span>driveways listed</span></div>
-      <div class="meter"><b id="stFree">--</b><span>free right now</span></div>
-      <div class="meter"><b>80%</b><span>of fare to host</span></div>
-    </div>
+    <nav class="nav">
+      <div class="navBrand" onclick="go('home')" style="cursor:pointer;">
+        <img src="/brand-logo.png" alt="Parkeroo" onerror="this.style.display='none'" />
+        <span class="word nv">parke<em>roo</em></span>
+      </div>
+      <div class="navLinks">
+        <a data-nav="how" onclick="go('how')">How it works</a>
+        <a data-nav="host" onclick="go('host')">Hosting</a>
+        <a data-nav="trust" onclick="go('trust')">Trust</a>
+        <button class="btn btn-paint navCta" onclick="go('start')">Sign in</button>
+      </div>
+    </nav>
 
-    <div class="tagWrap">
-      <div class="tag">
-        <div class="tabs">
-          <button id="tabIn" class="on" onclick="setMode('in')">Sign in</button>
-          <button id="tabUp" onclick="setMode('up')">Create account</button>
+    <!-- ---- HOME ---- -->
+    <div class="page" data-page="home">
+      <div class="hero">
+        <img class="heroLogo" src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
+        <h1 class="heroH">A local's driveway,<br/><em>open right now</em></h1>
+        <div class="tagline"><i>FIND IT.</i> <i>PARK IT.</i> GO.</div>
+        <div class="heroBtns">
+          <button class="btn btn-paint" onclick="go('start')">Find parking</button>
+          <button class="btn btn-tar" onclick="setMode('up');go('start')">List my driveway</button>
         </div>
-        <div id="fName" style="display:none;">
-          <label>YOUR NAME</label>
-          <input type="text" id="aName" placeholder="First name is enough" />
-        </div>
-        <label>EMAIL</label>
-        <input type="email" id="aEmail" placeholder="you@example.com" />
-        <label>PASSWORD</label>
-        <input type="password" id="aPass" placeholder="••••••••" />
-        <div id="fAgree" class="agree" style="display:none;">
-          <input type="checkbox" id="aAgree" />
-          <div>I am 18 or older and I agree to the <a href="/terms.html" target="_blank">Terms of Service</a> and <a href="/privacy.html" target="_blank">Privacy Policy</a></div>
-        </div>
-        <button class="btn btn-paint" style="width:100%;" id="authBtn" onclick="doAuth()">Sign in</button>
-        <div class="hint" id="authHint">New here? Tap "Create account" above.</div>
+      </div>
+      <div class="meterStrip">
+        <div class="meter"><b id="stTotal">--</b><span>driveways listed</span></div>
+        <div class="meter"><b id="stFree">--</b><span>free right now</span></div>
+        <div class="meter"><b>80%</b><span>of fare to host</span></div>
       </div>
     </div>
 
-    <section class="lanes">
-      <h2>How Parkeroo works</h2>
-      <div class="laneGrid">
-        <div class="laneCol">
-          <h3>Driving</h3>
-          <div class="step"><b>See what is free right now.</b> Every yellow pin on the map is a driveway that is open at this moment, with its hourly price shown on the pin.</div>
-          <div class="step"><b>Park without a reservation.</b> When you arrive, tap the pin and press Park now. A meter starts counting from that moment.</div>
-          <div class="step"><b>Pay for the time you used.</b> When you leave, press End and pay. You are charged by the minute, with a 15 minute minimum, through Stripe's secure checkout. You can rate the spot afterward.</div>
+    <!-- ---- HOW ---- -->
+    <div class="page" data-page="how" style="display:none;">
+      <section class="lanes">
+        <h2>How it works</h2>
+        <div class="laneGrid">
+          <div class="laneCol">
+            <h3>Driving</h3>
+            <div class="step"><b>Open the live map.</b> Coral pins are driveways free at this moment, priced per hour.</div>
+            <div class="step"><b>Tap Park now.</b> No reservation. A meter starts when you pull in.</div>
+            <div class="step"><b>End and pay.</b> Billed by the minute through Stripe, 15 minute minimum. Rate the spot after.</div>
+          </div>
+          <div class="laneCol">
+            <h3>Hosting</h3>
+            <div class="step"><b>Pin your driveway.</b> Add its street address and your hourly price.</div>
+            <div class="step"><b>Verify once with Stripe.</b> Identity and bank, so you can be paid.</div>
+            <div class="step"><b>Earn on autopilot.</b> You keep 80 percent of every fare, split automatically.</div>
+          </div>
         </div>
-        <div class="laneCol">
-          <h3>Hosting</h3>
-          <div class="step"><b>List your driveway in a minute.</b> Drop a pin on it, type its street address, and set the hourly price you want. You can open and close the listing whenever you like.</div>
-          <div class="step"><b>Verify yourself once.</b> Stripe confirms your identity and connects your bank account, which is what allows you to receive payouts.</div>
-          <div class="step"><b>Keep 80 percent of every fare.</b> Each payment is split automatically when a driver checks out, and you can follow your income in My earnings.</div>
-        </div>
-      </div>
-    </section>
-
-    <div class="sign">
-      <div class="signTop">Posted: listing rules</div>
-      <p>Every listing must carry its street address, and we check the address sits where the pin was dropped. Listings that pass are marked <span class="b bA">Address confirmed</span></p>
-      <p>Hosts who complete Stripe payout verification, a check of their legal identity and bank account, are marked <span class="b bH">Verified host</span></p>
-      <p>These checks make fake listings harder to create and tie every payout to a real, verified person. They are not proof of property ownership. If a listing looks wrong to you, report it and we will take it down while we investigate.</p>
+        <div class="pageCta"><button class="btn btn-paint" onclick="go('start')">Get started</button></div>
+      </section>
     </div>
 
-    <div class="foot"><a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a> · © 2026 Parkeroo</div>
+    <!-- ---- HOSTING ---- -->
+    <div class="page" data-page="host" style="display:none;">
+      <section class="calc">
+        <h2>Your driveway, on the meter</h2>
+        <p class="calcSub">Pick a price and see what stays in your pocket.</p>
+        <div class="ticket">
+          <div class="ticketTop">PARKEROO · HOST TICKET</div>
+          <div class="stepper">
+            <button class="stepBtn" onclick="bump(-1)">−</button>
+            <div class="stepVal"><b class="mono" id="mRate">$5</b><span>per hour</span></div>
+            <button class="stepBtn" onclick="bump(1)">+</button>
+          </div>
+          <div class="chipRow">
+            <button class="chip on" data-sc="0" onclick="scene(0)">Game days</button>
+            <button class="chip" data-sc="1" onclick="scene(1)">Commuter weekdays</button>
+            <button class="chip" data-sc="2" onclick="scene(2)">Every day</button>
+          </div>
+          <div class="tearline"></div>
+          <div class="ticketRows">
+            <div class="tRow"><span id="scDesc">8 events a month, 5 hours each</span><b class="mono" id="mMonth">$160</b></div>
+            <div class="tRow small"><span>after Parkeroo's 20 percent</span><span class="mono">kept by you</span></div>
+          </div>
+        </div>
+        <div class="pageCta"><button class="btn btn-paint" onclick="setMode('up');go('start')">Become a host</button></div>
+      </section>
+    </div>
+
+    <!-- ---- TRUST ---- -->
+    <div class="page" data-page="trust" style="display:none;">
+      <div class="sign" style="margin-top:34px;">
+        <div class="signTop">Posted: listing rules</div>
+        <p>Every listing carries its street address, and we check the address sits where the pin was dropped. Passing listings show <span class="b bA">Address confirmed</span></p>
+        <p>Hosts who complete Stripe payout verification show <span class="b bH">Verified host</span></p>
+        <p>These checks tie every payout to a real, verified person. They are not proof of ownership. Report a listing that looks wrong and it comes down while we investigate.</p>
+      </div>
+      <div class="pageCta"><button class="btn btn-paint" onclick="go('start')">Get started</button></div>
+    </div>
+
+    <!-- ---- SIGN IN ---- -->
+    <div class="page" data-page="start" style="display:none;">
+      <div class="tagWrap">
+        <div class="tag">
+          <div class="tabs">
+            <button id="tabIn" class="on" onclick="setMode('in')">Sign in</button>
+            <button id="tabUp" onclick="setMode('up')">Create account</button>
+          </div>
+          <div id="fName" style="display:none;">
+            <label>YOUR NAME</label>
+            <input type="text" id="aName" placeholder="First name is enough" />
+          </div>
+          <label>EMAIL</label>
+          <input type="email" id="aEmail" placeholder="you@example.com" />
+          <label>PASSWORD</label>
+          <input type="password" id="aPass" placeholder="••••••••" />
+          <div id="fAgree" class="agree" style="display:none;">
+            <input type="checkbox" id="aAgree" />
+            <div>I am 18 or older and I agree to the <a href="/terms.html" target="_blank">Terms of Service</a> and <a href="/privacy.html" target="_blank">Privacy Policy</a></div>
+          </div>
+          <button class="btn btn-paint" style="width:100%;" id="authBtn" onclick="doAuth()">Sign in</button>
+          <div class="hint" id="authHint">New here? Tap "Create account" above.</div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="siteFoot">
+      <div class="footBrand">
+        <img src="/brand-logo.png" alt="" onerror="this.style.display='none'" />
+        <span class="word nv">parke<em>roo</em></span>
+      </div>
+      <p><a href="mailto:support@parkeroo.app">support@parkeroo.app</a> · <a href="/terms.html" target="_blank">Terms</a> · <a href="/privacy.html" target="_blank">Privacy</a></p>
+      <p class="tiny">© 2026 Parkeroo. Parking arranged through Parkeroo is at the vehicle owner's risk; see the Terms.</p>
+    </footer>
   </div>
 
   <!-- ================= APP ================= -->
@@ -279,6 +394,29 @@ async function api(path, method="GET", body){
   if(!r.ok) throw new Error(d.error||"Something went wrong");
   return d;
 }
+
+// ---- simple page router ----
+function go(p){
+  document.querySelectorAll('#landing .page').forEach(el=>el.style.display = el.dataset.page===p ? 'block':'none');
+  document.querySelectorAll('.navLinks a').forEach(a=>a.className = a.dataset.nav===p ? 'on':'');
+  window.scrollTo({top:0});
+}
+
+// ---- host ticket ----
+let mRate = 5, mScene = 0;
+const scenes = [
+  { d:"8 events a month, 5 hours each",  hrs: 8*5 },
+  { d:"20 weekdays a month, 6 hours each", hrs: 20*6 },
+  { d:"30 days a month, 6 hours each",   hrs: 30*6 },
+];
+function bump(d){ mRate = Math.min(30, Math.max(2, mRate + d)); ticket(); }
+function scene(i){ mScene = i; document.querySelectorAll('.chip').forEach((c,ix)=>c.className = ix===i ? 'chip on':'chip'); ticket(); }
+function ticket(){
+  document.getElementById("mRate").textContent = "$"+mRate;
+  document.getElementById("scDesc").textContent = scenes[mScene].d;
+  document.getElementById("mMonth").textContent = "$"+Math.round(mRate*scenes[mScene].hrs*0.8);
+}
+ticket();
 
 (async function landingStats(){
   try{
