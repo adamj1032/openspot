@@ -102,6 +102,9 @@ async function initDb() {
   // Recorded consent. These are timestamps of who agreed to what, and when.
   await q(`ALTER TABLE sessions ADD COLUMN IF NOT EXISTS driver_ack_at TIMESTAMPTZ;`);
   await q(`ALTER TABLE spots ADD COLUMN IF NOT EXISTS host_attested_at TIMESTAMPTZ;`);
+  // Which version of the terms each user agreed to. Anyone on an older version is asked
+  // again before they can book or list, because the towing and permission section is new.
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT;`);
   await q(`
     CREATE TABLE IF NOT EXISTS messages (
       id SERIAL PRIMARY KEY,
@@ -154,8 +157,8 @@ app.post("/api/signup", async (req, res) => {
     if (!accepted) return res.status(400).json({ error: "You must agree to the Terms of Service and Privacy Policy" });
     const hash = bcrypt.hashSync(password, 10);
     const r = await q(
-      "INSERT INTO users (email, name, pass_hash, accepted_terms_at) VALUES ($1,$2,$3, now()) RETURNING id",
-      [email.toLowerCase(), name, hash]
+      "INSERT INTO users (email, name, pass_hash, accepted_terms_at, terms_version) VALUES ($1,$2,$3, now(), $4) RETURNING id",
+      [email.toLowerCase(), name, hash, TERMS_VERSION]
     );
     const token = jwt.sign({ id: r.rows[0].id, name }, JWT_SECRET, { expiresIn: "30d" });
     res.json({ token, name });
@@ -362,7 +365,8 @@ app.get("/api/spots", async (req, res) => {
   try {
     const r = await q(`
       SELECT s.id, s.lat, s.lng, s.price_cents, s.note, s.open, s.owner_id, s.address, s.address_verified,
-        s.photo, s.gps_verified, u.name AS host, u.payouts_enabled AS host_verified,
+        s.photo, s.gps_verified, (s.host_attested_at IS NOT NULL) AS attested,
+        u.name AS host, u.payouts_enabled AS host_verified,
         (SELECT driver_id FROM sessions WHERE spot_id = s.id AND ended_at IS NULL LIMIT 1) AS taken_by,
         (SELECT ROUND(AVG(stars)::numeric, 1) FROM ratings WHERE spot_id = s.id) AS rating,
         (SELECT COUNT(*)::int FROM ratings WHERE spot_id = s.id) AS rating_count
@@ -382,6 +386,10 @@ app.post("/api/spots", auth, async (req, res) => {
     // The host has to state, on the record, that they are allowed to rent this space.
     // A driveway can be subject to a lease, an association rule, or a local ordinance
     // that the owner alone knows about, and that is what gets a car towed.
+    const cons0 = await consentState(req.user.id);
+    if (cons0.needs_terms) {
+      return res.status(451).json({ error: "Our terms have changed. Please read and agree before listing.", code: "terms" });
+    }
     if (attest !== true) {
       return res.status(400).json({ error: "Please confirm you are allowed to rent out this space." });
     }
@@ -726,6 +734,65 @@ app.get("/api/connect/status", auth, async (req, res) => {
 });
 
 // ---- parking sessions ----
+// ---- terms version and re-consent ----
+//
+// Accounts and listings made before the private property and towing section carry no
+// agreement to it, and no statement from the host that they may rent the space. Rather
+// than trust old consent for new terms, we ask once and record the answer.
+const TERMS_VERSION = "2026-08-03";
+
+async function consentState(userId) {
+  const u = await q("SELECT terms_version FROM users WHERE id = $1", [userId]);
+  const sp = await q(
+    "SELECT id, address FROM spots WHERE owner_id = $1 AND hidden = false AND host_attested_at IS NULL",
+    [userId]
+  );
+  return {
+    terms_version: TERMS_VERSION,
+    needs_terms: !u.rows[0] || u.rows[0].terms_version !== TERMS_VERSION,
+    listings_needing_attest: sp.rows,
+  };
+}
+
+app.get("/api/consent", auth, async (req, res) => {
+  try {
+    res.json(await consentState(req.user.id));
+  } catch (err) {
+    console.error("consent:", err.message);
+    res.status(500).json({ error: "Could not check your agreement" });
+  }
+});
+
+app.post("/api/consent/terms", auth, async (req, res) => {
+  try {
+    if (req.body && req.body.accepted !== true) {
+      return res.status(400).json({ error: "You must agree to the Terms of Service and Privacy Policy" });
+    }
+    await q("UPDATE users SET terms_version = $1, accepted_terms_at = now() WHERE id = $2",
+      [TERMS_VERSION, req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("consent terms:", err.message);
+    res.status(500).json({ error: "Could not record your agreement" });
+  }
+});
+
+// A host confirming, for an existing listing, what new listings are asked at creation.
+app.post("/api/spots/:id/attest", auth, async (req, res) => {
+  try {
+    if (req.body && req.body.attest !== true) {
+      return res.status(400).json({ error: "Please confirm you are allowed to rent out this space." });
+    }
+    const r = await q("SELECT owner_id FROM spots WHERE id = $1", [req.params.id]);
+    if (!r.rows[0] || r.rows[0].owner_id !== req.user.id) return res.status(403).json({ error: "Not your listing" });
+    await q("UPDATE spots SET host_attested_at = now() WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("attest:", err.message);
+    res.status(500).json({ error: "Could not record that confirmation" });
+  }
+});
+
 // ---- holds and the meter ----
 //
 // Booking holds the space while the driver drives to it. The meter starts when they tap
@@ -815,12 +882,32 @@ app.post("/api/card/confirm", auth, async (req, res) => {
   try {
     if (!stripe) return res.status(503).json({ error: "Payments are not configured yet." });
     const csId = String(req.body && req.body.cs || "");
-    if (!csId) return res.status(400).json({ error: "Missing session reference" });
-    const cs = await stripe.checkout.sessions.retrieve(csId);
-    if (!cs || !cs.setup_intent) return res.status(400).json({ error: "That card form was not completed." });
-    const si = await stripe.setupIntents.retrieve(String(cs.setup_intent));
-    const pmId = si && si.payment_method;
-    if (!pmId) return res.status(400).json({ error: "No card was saved." });
+    let pmId = null;
+
+    // Normal path: Stripe hands back the checkout session, which points at the setup
+    // intent, which points at the saved card.
+    if (csId) {
+      try {
+        const cs = await stripe.checkout.sessions.retrieve(csId);
+        if (cs && cs.setup_intent) {
+          const si = await stripe.setupIntents.retrieve(String(cs.setup_intent));
+          pmId = si && si.payment_method ? String(si.payment_method) : null;
+        }
+      } catch (e) {
+        console.error("card confirm lookup:", e.message);
+      }
+    }
+
+    // Fallback: if that reference is missing or stale, ask Stripe what cards the
+    // customer actually has. The card is attached to them either way, so a lost
+    // redirect parameter should not leave someone unable to park.
+    if (!pmId) {
+      const customer = await ensureCustomer(req.user.id);
+      const list = await stripe.paymentMethods.list({ customer, type: "card", limit: 1 });
+      pmId = list.data && list.data[0] ? list.data[0].id : null;
+    }
+
+    if (!pmId) return res.status(400).json({ error: "No card was saved. Please try again." });
     const pm = await stripe.paymentMethods.retrieve(String(pmId));
     const card = pm.card || {};
     await q("UPDATE users SET payment_method_id = $1, card_brand = $2, card_last4 = $3 WHERE id = $4",
@@ -861,6 +948,15 @@ app.post("/api/park/:spotId", auth, async (req, res) => {
     if (busy.rows.length) return res.status(409).json({ error: "Just taken — pick another spot" });
     if (req.body && req.body.ack !== true) {
       return res.status(400).json({ error: "Please confirm you have checked the photo and address." });
+    }
+    const cons = await consentState(req.user.id);
+    if (cons.needs_terms) {
+      return res.status(451).json({ error: "Our terms have changed. Please read and agree before booking.", code: "terms" });
+    }
+    // A listing made before hosts were asked about permission carries no such claim,
+    // so it cannot be booked until its owner confirms.
+    if (!spot.host_attested_at) {
+      return res.status(409).json({ error: "This space is waiting on its host to confirm they may rent it. It cannot be booked yet.", code: "not_attested" });
     }
     // The space is held while the driver drives to it. Nothing is metered yet.
     const ins = await q(
