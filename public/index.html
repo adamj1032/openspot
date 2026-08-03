@@ -215,14 +215,14 @@
   /* brand fills */
   .hero { position:relative; overflow:hidden; }
   .heroBg { position:absolute; left:-8%; bottom:-14%; width:min(46vw,520px); opacity:.045; transform:rotate(8deg) scaleX(-1); pointer-events:none; }
-  .statPills { display:flex; gap:14px; margin-top:30px; flex-wrap:wrap; }
-  .pill { background:var(--asphalt); color:#fff; border-radius:999px; padding:12px 22px; display:flex; align-items:baseline; gap:9px; box-shadow:0 6px 18px rgba(32,43,71,.16); }
-  .pill b { font-size:22px; color:var(--paint); }
-  .pill span { font-size:12.5px; letter-spacing:.6px; color:#AEB6C8; text-transform:uppercase; font-weight:800; }
+  
+  
+  
+  
   .band { position:relative; overflow:hidden; }
   .bandRoo { position:absolute; right:-4%; top:50%; transform:translateY(-50%) rotate(-6deg); width:min(30vw,340px); opacity:.07; pointer-events:none; }
   .secMark { display:block; width:52px; height:52px; object-fit:contain; margin:0 auto 14px; }
-  @media (max-width:860px){ .statPills { justify-content:center; } .heroBg { display:none; } }
+  @media (max-width:860px){ .heroBg { display:none; } }
 
   /* ---------- app ---------- */
   #mainView { display:none; flex:1; min-height:0; flex-direction:column; background:var(--concrete); }
@@ -304,10 +304,6 @@
           <div class="heroBtns">
             <button class="btn btn-paint" onclick="go('start')">Find parking</button>
             <button class="btn btn-tar" onclick="setMode('up');go('start')">List my driveway</button>
-          </div>
-          <div class="statPills">
-            <div class="pill"><b class="mono" id="stFree">--</b><span>open right now</span></div>
-            <div class="pill"><b class="mono">80%</b><span>kept by hosts</span></div>
           </div>
         </div>
         <div class="heroArt">
@@ -545,18 +541,6 @@ function ticket(){
   document.getElementById("mMonth").textContent = "$"+Math.round(mRate*scenes[mScene].hrs*0.8);
 }
 ticket();
-
-(async function landingStats(){
-  try{
-    const spots = await api("/spots");
-    const free = spots.filter(s=>s.open && !s.taken_by).length;
-    const el = document.getElementById("stFree");
-    if(el) el.textContent = String(free).padStart(2,"0");
-  }catch(e){
-    const el = document.getElementById("stFree");
-    if(el) el.textContent = "00";
-  }
-})();
 
 function setMode(m){
   mode = m;
