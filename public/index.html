@@ -282,7 +282,7 @@
   .hPill.ok { background:#E2F3E9; color:#1F7A45; }
   .hPill.warn { background:#FDE7E7; color:#B23A3C; }
   .hAdd { flex:none; padding:9px 16px; font-size:13px; border-radius:10px; }
-  #payReset { display:block; text-align:center; font-size:12.5px; color:#7C8494; font-weight:700; cursor:pointer; text-decoration:underline; margin-top:10px; }
+  #payReset { font-size:13px; padding:11px 0; }
   .spotRow { display:flex; gap:12px; align-items:center; border-top:1px solid var(--line); padding:12px 0; }
   .spotRow:first-child { border-top:none; }
   .spotRow img { width:64px; height:48px; object-fit:cover; border-radius:8px; background:#EFECE5; flex:none; }
@@ -303,6 +303,9 @@
   .listCard input[type=text], .listCard input[type=number] { width:100%; margin:6px 0 8px; padding:12px; border-radius:10px; border:2px solid var(--line); background:#FBFAF7; font-size:15px; font-family:'Nunito',sans-serif; }
   .listCard input:focus { outline:none; border-color:var(--paint); }
   .listCard .tiny { font-size:11.5px; color:#8892A8; line-height:1.45; margin-top:2px; }
+  .presenceNote { font-size:12.5px; line-height:1.5; color:#7C8494; background:#F3EFE7; border-radius:10px; padding:10px 12px; margin-bottom:6px; }
+  .presenceNote.ok { background:#E2F3E9; color:#1F7A45; }
+  .presenceNote.warn { background:#FDE7E7; color:#B23A3C; }
   .addrResult { font-size:13px; line-height:1.5; margin:8px 0 2px; }
   .addrResult.ok { color:#1F7A45; }
   .addrResult.warn { color:#B23A3C; }
@@ -312,7 +315,8 @@
 
   #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:var(--asphalt); color:#fff; padding:10px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; max-width:90%; border:2px solid var(--paint); }
   .pop b { font-size:15px; font-family:'Nunito',sans-serif; font-weight:800; }
-  .pop img.pPhoto { width:100%; height:110px; object-fit:cover; border-radius:8px; margin:6px 0 4px; }
+  .pop img.pPhoto { width:100%; height:140px; object-fit:cover; border-radius:8px; margin:6px 0 4px; border:1px solid #E6E0D4; }
+  .pop .liab { font-size:10.5px; line-height:1.45; color:#8A8375; background:#F5F2EC; border-radius:6px; padding:6px 8px; margin:4px 0 2px; }
   .pop .priceLine { display:flex; align-items:baseline; gap:6px; margin:4px 0 0; }
   .pop .big { font-size:22px; font-weight:700; color:#26211C; }
   .pop .per { font-size:11px; color:#8A8375; }
@@ -530,7 +534,7 @@
   <!-- ================= APP ================= -->
   <div id="mainView">
     <header class="top">
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;cursor:pointer;" onclick="backToSite()" title="Back to the Parkeroo home page">
         <img src="/brand-logo.png" alt="" width="34" height="34" style="border-radius:8px;background:#fff;padding:2px;" onerror="this.style.display='none'" />
         <div><div class="word sm">parke<em>roo</em></div><div class="sub" id="hello"></div></div>
       </div>
@@ -570,7 +574,7 @@
           <div class="hHead"><h3>Getting paid</h3><span class="hPill" id="payPill">checking…</span></div>
           <p id="payText" class="hSub">Checking your payout status…</p>
           <button class="btn btn-paint" id="payBtn" style="display:none;width:100%;" onclick="setupPayouts()">Set up payouts</button>
-          <a id="payReset" onclick="resetPayouts()" style="display:none;">Used the wrong phone or email? Start over</a>
+          <button id="payReset" class="btn btn-ghost" style="display:none;width:100%;margin-top:10px;" onclick="resetPayouts()">Start payout setup over</button>
         </div>
 
         <div class="hCard">
@@ -593,20 +597,21 @@
   <div id="lister" onclick="if(event.target.id==='lister') closeLister()">
     <div class="listCard">
       <h3>List your driveway</h3>
-      <p class="hSub">We place it on the map from the address you give us, so drivers arrive at the right house.</p>
+      <p class="hSub">We place the pin from the address you give us, and we check that you are standing at the driveway while you list it.</p>
+      <div class="presenceNote" id="presNote">You need to be at the driveway, with location access allowed, to publish it.</div>
 
       <label>STREET ADDRESS</label>
       <input id="lAddr" type="text" placeholder="123 Maple Ave, Haddonfield, NJ" oninput="addrDirty()" />
       <button class="btn btn-tar" style="width:100%;margin-bottom:4px;" onclick="findAddr()">Find this address</button>
       <div id="addrResult" class="addrResult"></div>
 
-      <label>PHOTO OF THE DRIVEWAY</label>
+      <label>PHOTO OF THE DRIVEWAY (REQUIRED)</label>
       <div class="photoRow">
         <label class="photoPick" for="lPhoto">Choose a photo</label>
         <input id="lPhoto" type="file" accept="image/*" style="display:none;" onchange="pickPhoto(event)" />
         <img id="photoPrev" style="display:none;" />
       </div>
-      <p class="tiny">A clear shot of the driveway from the street. Listings with photos get chosen far more often.</p>
+      <p class="tiny">Take it now, from the driveway itself: a clear view of where a car would pull in. Drivers see this photo before they commit, and it is the main reason a spot gets picked.</p>
 
       <label>PRICE PER HOUR ($)</label>
       <input id="lPrice" type="number" value="5" min="1" />
@@ -728,6 +733,13 @@ async function doAuth(){
   }catch(e){ toast(e.message); }
 }
 
+function backToSite(){
+  document.getElementById("mainView").style.display="none";
+  document.getElementById("landing").style.display="block";
+  go("home");
+  toast("Signed in as " + myName + " — pick Sign in to go back to the map");
+}
+
 /* ---------- view switch ---------- */
 function setView(v, fromPop){
   appView = v;
@@ -778,6 +790,7 @@ async function refresh(){
       }
       const stars = s.rating ? ` · ★ ${s.rating} (${s.rating_count})` : "";
       const badges =
+        (s.gps_verified ? '<span class="bg bgA">Verified on site</span>' : '') +
         (s.address_verified ? '<span class="bg bgA">Address confirmed</span>' : '<span class="bg bgU">Approximate location</span>') +
         (s.host_verified ? '<span class="bg bgH">Verified host</span>' : '');
       const photo = s.photo ? `<img class="pPhoto" src="${s.photo}" />` : "";
@@ -790,6 +803,7 @@ async function refresh(){
           <button style="background:${s.open?"#9AA1B0":"#1F9D55"}" onclick="toggleSpot(${s.id},${s.open?0:1})">${s.open?"Close it":"Open it"}</button></div>`;
       } else if(isFree){
         b = `<div class="pop"><b>${s.host}'s driveway</b>${photo}${priceLine}<div class="m">${s.note?s.note:""}${stars}</div>${addr}${badges}
+          <div class="liab">Check the photo and the address before you pull in. Parking is arranged between you and the host; Parkeroo does not own or inspect this space.</div>
           <button style="background:#1F9D55" onclick="park(${s.id})">Park here now</button>
           <button class="rep" onclick="reportSpot(${s.id})">Report this listing</button></div>`;
       } else {
@@ -856,7 +870,7 @@ async function checkPayouts(){
     } else {
       pill.textContent="Not started"; pill.className="hPill";
       txt.textContent="Stripe verifies who you are and connects your bank account. It takes a few minutes, once, and it is what lets us pay you.";
-      btn.style.display="block"; btn.textContent="Set up payouts"; rst.style.display="none";
+      btn.style.display="block"; btn.textContent="Set up payouts"; rst.style.display="block";
     }
   }catch(e){
     pill.textContent="Unavailable"; pill.className="hPill warn";
@@ -869,9 +883,12 @@ async function setupPayouts(){
   catch(e){ toast(e.message); }
 }
 async function resetPayouts(){
-  if(!confirm("Start payout setup over with different details? This clears the setup you began but did not finish.")) return;
-  try{ await api("/connect/reset","POST",{}); toast("Cleared. Tap Set up payouts to begin again."); checkPayouts(); }
-  catch(e){ toast(e.message); }
+  if(!confirm("Start payout setup over? This clears any setup you began but did not finish, so you can use a different phone or email.")) return;
+  try{
+    const d = await api("/connect/reset","POST",{});
+    toast(d.note ? "Nothing to clear — tap Set up payouts to begin." : "Cleared. Tap Set up payouts to begin again.");
+    checkPayouts();
+  }catch(e){ toast(e.message); }
 }
 
 /* ---------- my driveways ---------- */
@@ -945,25 +962,54 @@ function pickPhoto(ev){
     }; img.src = rd.result; };
   rd.readAsDataURL(f);
 }
+function getDevicePos(){
+  return new Promise((resolve)=>{
+    if(!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      p=>resolve([p.coords.latitude, p.coords.longitude]),
+      ()=>resolve(null),
+      { enableHighAccuracy:true, timeout:12000, maximumAge:0 }
+    );
+  });
+}
 async function publish(){
   const btn=document.getElementById("lSubmit");
+  const note=document.getElementById("presNote");
   try{
     if(!pickedAddr){ toast("Tap Find this address first so we can place your pin"); return; }
+    if(!pickedPhoto){ toast("Add a photo of the driveway — drivers need to see it"); return; }
     const price = Math.round((parseFloat(document.getElementById("lPrice").value)||5)*100);
-    btn.disabled=true; btn.textContent="Publishing…";
+
+    btn.disabled=true; btn.textContent="Checking you're here…";
+    note.className="presenceNote"; note.textContent="Confirming your location…";
+    const pos = await getDevicePos();
+    if(!pos){
+      note.className="presenceNote warn";
+      note.textContent="We couldn't read your location. Allow location access in your browser and try again from the driveway.";
+      btn.disabled=false; btn.textContent="Publish driveway"; return;
+    }
+
+    btn.textContent="Publishing…";
     const d = await api("/spots","POST",{
       address: document.getElementById("lAddr").value,
       price_cents: price,
       note: document.getElementById("lNote").value,
-      photo: pickedPhoto
+      photo: pickedPhoto,
+      device_lat: pos[0], device_lng: pos[1]
     });
     closeLister();
     document.getElementById("lAddr").value=""; document.getElementById("lNote").value="";
     document.getElementById("photoPrev").style.display="none"; pickedPhoto=null; pickedAddr=null;
     document.getElementById("addrResult").textContent="";
+    document.getElementById("presNote").className="presenceNote";
+    document.getElementById("presNote").textContent="You need to be at the driveway, with location access allowed, to publish it.";
     loadMySpots(); refresh();
-    toast(d.precise ? "Your driveway is on the map." : "Listed. The address was only found approximately, so it shows as an approximate location.");
-  }catch(e){ toast(e.message); }
+    toast(d.precise ? "Your driveway is on the map, verified on site." : "Listed and verified on site. The address only resolved approximately, so it shows as an approximate location.");
+  }catch(e){
+    const note=document.getElementById("presNote");
+    if(/standing at them|location to confirm/i.test(e.message)){ note.className="presenceNote warn"; note.textContent=e.message; }
+    toast(e.message);
+  }
   finally{ btn.disabled=false; btn.textContent="Publish driveway"; }
 }
 
