@@ -598,7 +598,7 @@
     <div class="listCard">
       <h3>List your driveway</h3>
       <p class="hSub">We place the pin from the address you give us, and we check that you are standing at the driveway while you list it.</p>
-      <div class="presenceNote" id="presNote">You need to be at the driveway, with location access allowed, to publish it.</div>
+      <div class="presenceNote" id="presNote">You must be standing in the driveway itself, with location access allowed. Listing from nearby will not work.</div>
 
       <label>STREET ADDRESS</label>
       <p class="tiny" style="margin:4px 0 0;">Write it out in full, separated by commas: <b>number and street, town, state</b>. Spell the street type and the state out rather than abbreviating them.<br/>Example: <span class="mono" style="font-size:12px;">123 Main Street, Anytown, New Jersey</span></p>
@@ -1005,9 +1005,9 @@ function getDevicePos(){
   return new Promise((resolve)=>{
     if(!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
-      p=>resolve([p.coords.latitude, p.coords.longitude]),
+      p=>resolve([p.coords.latitude, p.coords.longitude, p.coords.accuracy]),
       ()=>resolve(null),
-      { enableHighAccuracy:true, timeout:12000, maximumAge:0 }
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
     );
   });
 }
@@ -1034,14 +1034,14 @@ async function publish(){
       price_cents: price,
       note: document.getElementById("lNote").value,
       photo: pickedPhoto,
-      device_lat: pos[0], device_lng: pos[1]
+      device_lat: pos[0], device_lng: pos[1], device_accuracy: pos[2]
     });
     closeLister();
     document.getElementById("lAddr").value=""; document.getElementById("lNote").value="";
     document.getElementById("photoPrev").style.display="none"; pickedPhoto=null; pickedAddr=null;
     document.getElementById("addrResult").textContent="";
     document.getElementById("presNote").className="presenceNote";
-    document.getElementById("presNote").textContent="You need to be at the driveway, with location access allowed, to publish it.";
+    document.getElementById("presNote").textContent="You must be standing in the driveway itself, with location access allowed. Listing from nearby will not work.";
     loadMySpots(); refresh();
     toast(d.precise ? "Your driveway is on the map, verified on site." : "Listed and verified on site. The address only resolved approximately, so it shows as an approximate location.");
   }catch(e){
