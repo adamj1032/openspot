@@ -8,8 +8,20 @@ import Stripe from "stripe";
 import "dotenv/config";
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
 app.use(express.static("public"));
+
+// Body-parser failures (oversized photo, malformed JSON) must come back as JSON,
+// not as an HTML error page the front end cannot read.
+app.use((err, req, res, next) => {
+  if (err && err.type === "entity.too.large") {
+    return res.status(413).json({ error: "That photo is too large. Take it again at a smaller size and try once more." });
+  }
+  if (err && err.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "We could not read that request. Try again." });
+  }
+  return next(err);
+});
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set. Add it in Render > Environment.");
@@ -173,6 +185,18 @@ async function photon(query) {
   };
 }
 
+// Great-circle distance in metres between two coordinates.
+function metersBetween(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
 async function geocodeAddress(address) {
   const clean = tidyAddress(address);
   // Try a few phrasings: people type addresses without commas all the time.
@@ -244,8 +268,9 @@ app.post("/api/spots", auth, async (req, res) => {
 
     // Presence check: the host's device must actually be at the driveway when listing it.
     let gpsOk = false, gpsMeters = null;
-    if (typeof device_lat === "number" && typeof device_lng === "number") {
-      gpsMeters = metersBetween(device_lat, device_lng, hit.lat, hit.lng);
+    const dLat = Number(device_lat), dLng = Number(device_lng);
+    if (isFinite(dLat) && isFinite(dLng)) {
+      gpsMeters = metersBetween(dLat, dLng, hit.lat, hit.lng);
       gpsOk = gpsMeters <= 200;
     }
     if (!gpsOk) {
