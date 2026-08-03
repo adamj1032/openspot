@@ -651,6 +651,21 @@
       <label>ANYTHING DRIVERS SHOULD KNOW</label>
       <input id="lNote" placeholder="Fits an SUV, shaded, gate opens on arrival" />
 
+      <label>AVAILABLE UNTIL (OPTIONAL)</label>
+      <input id="lUntil" type="time" />
+      <p class="tiny">Need the driveway back by a certain time each day? Nobody can book past it. Leave blank for no limit.</p>
+
+      <label>LONGEST STAY (OPTIONAL)</label>
+      <select id="lMax">
+        <option value="">No limit</option>
+        <option value="60">1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="240">4 hours</option>
+        <option value="480">8 hours</option>
+        <option value="720">12 hours</option>
+      </select>
+      <p class="tiny">Drivers say how long they need, and anything longer than this is refused automatically. You are never asked to approve a booking, so nobody waits on you.</p>
+
       <label>ARRIVAL INSTRUCTIONS (SHOWN ONLY AFTER SOMEONE BOOKS)</label>
       <input id="lArrival" placeholder="Left side, past the blue bin. Do not block the garage." />
       <p class="tiny">Kept private until a car is booked in, so a gate code or door detail is safe here. Good instructions are the main reason drivers do not need to message you.</p>
@@ -972,6 +987,27 @@ async function removeSpot(id){
    and the thing being agreed to is a stranger's private property. The review step puts the
    photo, the address and the cost in front of the driver and asks them to confirm they
    checked, which is also the moment the warning is given. */
+function fmtMins(m){
+  if(m<60) return m+" minutes";
+  const h=Math.floor(m/60), r=m%60;
+  return h+(h===1?" hour":" hours")+(r?" "+r+" minutes":"");
+}
+
+// Only offer durations the host actually allows, so a driver never picks something
+// that is then refused.
+function durationOptions(s){
+  let cap = s.max_minutes || 720;
+  if(s.available_until){
+    const [h,m] = s.available_until.split(":").map(Number);
+    const t = new Date(); t.setHours(h,m,0,0);
+    const left = Math.round((t.getTime()-Date.now())/60000);
+    if(left>0) cap = Math.min(cap, left);
+  }
+  const choices = [30,60,120,240,480,720].filter(x=>x<=cap);
+  if(!choices.length) choices.push(Math.max(15, cap));
+  return choices.map((x,i)=>`<option value="${x}"${i===1||choices.length===1?" selected":""}>${fmtMins(x)}</option>`).join("");
+}
+
 function reviewSpot(id){
   const s = spotsById[id];
   if(!s){ toast("That space is no longer on the map."); return; }
@@ -986,6 +1022,13 @@ function reviewSpot(id){
     <div class="priceLine"><span class="mono big">$${price}</span><span class="per">per hour</span></div>
     <p class="sub2" style="color:#7C8494;margin:2px 0 10px;">15 minute minimum, so the least you can pay is $${minCharge}. You are charged when you end the session.</p>
     <p style="margin:0 0 4px;"><b>${esc(s.address||"Address not given")}</b></p>
+    ${s.max_minutes||s.available_until ? `<p class="sub2" style="color:#7C8494;margin:0 0 6px;">
+      ${s.max_minutes?`Longest stay ${fmtMins(s.max_minutes)}.`:""}
+      ${s.available_until?`Free until ${esc(s.available_until)}.`:""}</p>` : ""}
+    <label style="display:block;font-size:12px;font-weight:700;letter-spacing:.06em;color:#7C8494;margin:12px 0 4px;">HOW LONG DO YOU NEED IT?</label>
+    <select id="parkMins" style="width:100%;">${durationOptions(s)}</select>
+    <p class="sub2" style="color:#7C8494;margin:6px 0 10px;">An estimate, not a commitment. Leave early and you pay only for the time used.
+      Ten minutes of grace after that, then the extra time costs half as much again.</p>
     <p class="sub2" style="color:#7C8494;margin:0 0 10px;">${esc(s.note||"")}${s.note?" · ":""}${stars}</p>
     <div class="arrivalBox">This is private property, and you are parking on it by the host's permission only.
       Compare this photo and address with what is in front of you, and if they do not match, do not park and report the listing.
@@ -1006,7 +1049,8 @@ function reviewSpot(id){
 
 async function park(id){
   try{
-    const d = await api("/park/"+id,"POST",{ack:true});
+    const el = document.getElementById("parkMins");
+    const d = await api("/park/"+id,"POST",{ack:true, expected_minutes: el ? Number(el.value) : 60});
     map.closePopup();
     await checkSession(); refresh(); loadThreads();
     // Drop the driver straight into the thread, where the arrival instructions are waiting.
@@ -1053,7 +1097,11 @@ async function endSession(){
   try{
     const d = await api("/end/"+sess.id,"POST");
     sess=null; document.getElementById("session").style.display="none"; refresh();
-    if(d.paid){ toast("Session ended, $"+(d.amount_cents/100).toFixed(2)+" charged to your card."); openHistory(); }
+    if(d.paid){
+      toast("Session ended, $"+(d.amount_cents/100).toFixed(2)+" charged to your card."
+        + (d.overstay_cents ? " Includes $"+(d.overstay_cents/100).toFixed(2)+" for staying past your estimate." : ""));
+      openHistory();
+    }
     else if(d.pay_url){ toast(d.error || "Finishing your payment…"); setTimeout(()=>{ location.href = d.pay_url; }, 1200); }
     else { toast("Session ended · $"+(d.amount_cents/100).toFixed(2)); openHistory(); }
   }catch(e){ toast(e.message); }
@@ -1466,11 +1514,14 @@ async function publish(){
       photo: pickedPhoto,
       arrival_note: document.getElementById("lArrival").value,
       attest: document.getElementById("lAttest").checked,
+      available_until: document.getElementById("lUntil").value || null,
+      max_minutes: document.getElementById("lMax").value || null,
       device_lat: pos[0], device_lng: pos[1], device_accuracy: pos[2]
     });
     closeLister();
     document.getElementById("lAddr").value=""; document.getElementById("lNote").value="";
     document.getElementById("lArrival").value="";
+    document.getElementById("lUntil").value=""; document.getElementById("lMax").value="";
     document.getElementById("photoPrev").style.display="none"; pickedPhoto=null; pickedAddr=null;
     document.getElementById("addrResult").textContent="";
     document.getElementById("presNote").className="presenceNote";
