@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
 <title>Parkeroo — park in a local's driveway</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -251,7 +251,9 @@
 
   /* ---------- app ---------- */
   #mainView { display:none; flex:1; min-height:0; flex-direction:column; background:var(--concrete); }
-  header.top { background:var(--asphalt); color:var(--chalk); padding:12px clamp(16px,4vw,40px); display:flex; justify-content:space-between; align-items:center; }
+  header.top { background:var(--asphalt); color:var(--chalk);
+    padding:calc(12px + env(safe-area-inset-top)) clamp(16px,4vw,40px) 12px;
+    display:flex; justify-content:space-between; align-items:center; }
   .word.sm { font-size:20px; }
   .sub { font-size:11.5px; color:#AEB6C8; }
   #count { font-family:'IBM Plex Mono',monospace; color:#FFD9D9; font-size:13px; font-weight:700; }
@@ -361,12 +363,17 @@
     font-size:14px;color:#202B47;margin-bottom:12px;}
   .msgForm{display:flex;gap:8px;margin-top:6px;}
   .msgForm input{flex:1;margin:0;}
-  #msgDock{display:none;position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:1200;
+  #msgDock{display:none;position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(16px + env(safe-area-inset-bottom));z-index:1200;
     background:#202B47;color:#fff;border-radius:999px;padding:11px 20px;cursor:pointer;
     box-shadow:0 6px 20px rgba(32,43,71,.35);font-weight:700;font-size:14px;
     align-items:center;gap:9px;border:2px solid #fff;}
   #msgDock.on{display:flex;}
   #msgDock .dockDot{width:8px;height:8px;border-radius:50%;background:#5BD08A;flex:none;}
+  /* Native shell: leave room for the home indicator, and stop the whole page
+     rubber-banding when someone scrolls the map. */
+  body { padding-bottom: env(safe-area-inset-bottom); overscroll-behavior-y: none; }
+  .bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
 </style>
 </head>
 <body>
