@@ -438,8 +438,13 @@ app.post("/api/spots", auth, async (req, res) => {
     // house on their street; a 200m radius covers roughly twenty neighbouring driveways.
     // We use a tight base radius and widen it only by however uncertain the phone says
     // its own fix is, capped, so genuine GPS drift is tolerated but slack is not handed out.
-    const PRESENCE_BASE_M = 60;
-    const PRESENCE_MAX_M = 120;
+    // Two errors have to fit inside this radius: the phone's GPS, and the geocoder's guess
+    // at where the house is. The second is the bigger one. Street databases interpolate
+    // house numbers along a block, and measured against a real Haddonfield address the
+    // geocoded point sat 98m from the actual driveway. A 60m radius therefore blocks
+    // honest hosts. 150m still means the right block rather than anywhere in town.
+    const PRESENCE_BASE_M = 120;
+    const PRESENCE_MAX_M = 150;
     const ACCURACY_LIMIT_M = 100;
 
     const dLat = Number(device_lat), dLng = Number(device_lng);
