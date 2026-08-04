@@ -64,7 +64,7 @@
   
 
   /* hang-tag auth card */
-  .tagWrap { display:flex; justify-content:center; padding:64px 16px 30px; }
+  .tagWrap { display:flex; justify-content:center; padding:64px 16px calc(30px + env(safe-area-inset-bottom)); }
   .tag { width:100%; max-width:440px; background:var(--chalk); border:3px solid var(--asphalt); border-radius:22px; position:relative; padding:34px 20px 22px; box-shadow:0 10px 24px rgba(32,43,71,.14); }
   .tag::before { content:""; position:absolute; top:12px; left:50%; transform:translateX(-50%); width:44px; height:14px; border:3px solid var(--asphalt); border-radius:999px; background:var(--concrete); }
   .tabs { display:flex; gap:8px; margin:10px 0 18px; }
@@ -300,7 +300,8 @@
   .earnNum { font-family:'IBM Plex Mono',monospace; font-size:32px; font-weight:700; color:var(--free); }
 
   /* listing sheet */
-  #lister { display:none; position:fixed; inset:0; background:rgba(32,43,71,.55); z-index:999; overflow:auto; padding:24px 14px; }
+  #lister { display:none; position:fixed; inset:0; background:rgba(32,43,71,.55); z-index:999; overflow:auto;
+    padding:calc(24px + env(safe-area-inset-top)) 14px calc(24px + env(safe-area-inset-bottom)); }
   .listCard { background:var(--chalk); border:2px solid var(--asphalt); border-radius:20px; max-width:480px; margin:0 auto; padding:22px 22px 24px; box-shadow:0 20px 50px rgba(32,43,71,.3); }
   .listCard h3 { font-family:'Fredoka',sans-serif; font-weight:700; font-size:22px; }
   .listCard label { display:block; font-size:11px; font-weight:800; color:#7C8494; letter-spacing:.8px; margin-top:14px; }
@@ -317,7 +318,7 @@
   .photoPick { display:inline-block; padding:10px 16px; border-radius:10px; background:var(--asphalt); color:#fff; font-size:13px; font-weight:800; cursor:pointer; }
   #photoPrev { width:88px; height:66px; object-fit:cover; border-radius:10px; border:2px solid var(--line); }
 
-  #toast { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:var(--asphalt); color:#fff; padding:10px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; max-width:90%; border:2px solid var(--paint); }
+  #toast { position:fixed; top:calc(12px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); background:var(--asphalt); color:#fff; padding:10px 16px; border-radius:10px; font-size:13px; font-weight:700; display:none; z-index:9999; max-width:90%; border:2px solid var(--paint); }
   .pop b { font-size:15px; font-family:'Nunito',sans-serif; font-weight:800; }
   .pop img.pPhoto { width:100%; height:140px; object-fit:cover; border-radius:8px; margin:6px 0 4px; border:1px solid #E6E0D4; }
   .pop .liab { font-size:10.5px; line-height:1.45; color:#8A8375; background:#F5F2EC; border-radius:6px; padding:6px 8px; margin:4px 0 2px; }
