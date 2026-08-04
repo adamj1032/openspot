@@ -287,13 +287,21 @@
   .hPill.warn { background:#FDE7E7; color:#B23A3C; }
   .hAdd { flex:none; padding:9px 16px; font-size:13px; border-radius:10px; }
   #payReset { font-size:13px; padding:11px 0; }
-  .spotRow { display:flex; gap:12px; align-items:center; border-top:1px solid var(--line); padding:12px 0; }
+  /* On a phone four controls will not sit beside a thumbnail, so the row wraps and the
+     buttons take their own line rather than running off the edge of the screen. */
+  .spotRow { display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+    border-top:1px solid var(--line); padding:12px 0; }
   .spotRow:first-child { border-top:none; }
   .spotRow img { width:64px; height:48px; object-fit:cover; border-radius:8px; background:#EFECE5; flex:none; }
   .spotRow .sInfo { flex:1; min-width:0; }
-  .spotRow .sInfo b { display:block; font-size:14.5px; }
+  .spotRow .sInfo b { display:block; font-size:14.5px; line-height:1.35; }
   .spotRow .sInfo span { font-size:12px; color:#7C8494; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .spotRow .sBtns { display:flex; gap:6px; flex:none; }
+  .spotRow .sBtns { display:flex; gap:6px; flex-wrap:wrap; }
+  @media (max-width:520px){
+    .spotRow .sInfo { flex:1 1 60%; }
+    .spotRow .sBtns { flex:1 1 100%; }
+    .spotRow .sBtns .miniBtn { flex:1 1 auto; text-align:center; }
+  }
   .miniBtn { font-size:12px; font-weight:800; padding:7px 11px; border-radius:8px; background:var(--asphalt); color:#fff; }
   .miniBtn.off { background:#9AA1B0; }
   .miniBtn.del { background:#B23A3C; }
