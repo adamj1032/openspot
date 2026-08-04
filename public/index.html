@@ -385,6 +385,13 @@
      rubber-banding when someone scrolls the map. */
   body { padding-bottom: env(safe-area-inset-bottom); overscroll-behavior-y: none; }
   .bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  /* Checkboxes are agreements here, not decoration: the towing acknowledgement, the
+     host attestation, the terms. A default browser checkbox is about 13px on a phone,
+     which is too small to hit and too small to notice. */
+  input[type=checkbox] {
+    width:24px !important; height:24px !important; min-width:24px;
+    accent-color:var(--paint); flex:none; cursor:pointer;
+  }
 </style>
 </head>
 <body>
