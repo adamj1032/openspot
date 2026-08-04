@@ -1584,7 +1584,12 @@ async function rate(sessionId, stars){
 
 /* ---------- install to home screen ---------- */
 let deferredPrompt = null;
-function isStandalone(){ return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true; }
+function isNativeApp(){ return location.protocol !== "http:" && location.protocol !== "https:"; }
+function isStandalone(){
+  return isNativeApp()
+    || window.matchMedia("(display-mode: standalone)").matches
+    || window.navigator.standalone === true;
+}
 function showInstall(){
   if(isStandalone()) return;
   if(sessionStorage.getItem("pk_install_dismissed")) return;
